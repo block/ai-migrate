@@ -1,5 +1,5 @@
 import pytest
-from ai_migrate.resolve_symbols import get_symbol_definition, contains_definition
+from ai_migrate.resolve_symbols import contains_definition
 
 
 @pytest.mark.parametrize(
@@ -34,7 +34,6 @@ from ai_migrate.resolve_symbols import get_symbol_definition, contains_definitio
 )
 def test_contains_definition(line, symbol, expected):
     assert contains_definition(line, symbol) == expected
-
 
 
 if __name__ == "__main__":
