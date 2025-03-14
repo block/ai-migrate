@@ -8,179 +8,142 @@ from typing import Dict, List, Tuple
 from ai_migrate.llm_providers import DefaultClient
 
 
-async def get_pr_details(pr_number: str) -> Dict:
+async def _run_gh_command(args: list) -> str:
+    """Run a GitHub CLI command and return its output.
+
+    Args:
+        args: List of command arguments to pass to gh
+
+    Returns:
+        The command output as a string
+
+    Raises:
+        subprocess.CalledProcessError: If the command fails
+    """
+    process = await asyncio.create_subprocess_exec(
+        "gh",
+        *args,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
+    )
+    stdout, stderr = await process.communicate()
+
+    if process.returncode != 0:
+        raise subprocess.CalledProcessError(
+            process.returncode, ["gh"] + args, output=stdout, stderr=stderr
+        )
+
+    return stdout.decode()
+
+
+async def get_pr_details(pr_url: str) -> Dict:
     """Get details about a PR using the GitHub CLI.
 
     Args:
-        pr_number: The PR number to get details for
+        pr_url: The PR URL or reference (e.g., 'https://github.com/owner/repo/pull/123' or 'owner/repo#123')
 
     Returns:
         A dictionary with PR details
     """
-    result = await asyncio.create_subprocess_exec(
-        "gh",
-        "pr",
-        "view",
-        pr_number,
-        "--json",
-        "title,body,files,commits,additions,deletions,changedFiles",
-        stdout=subprocess.PIPE,
-        stderr=subprocess.PIPE,
+    json_output = await _run_gh_command(
+        [
+            "pr",
+            "view",
+            pr_url,
+            "--json",
+            "title,body,files,commits,additions,deletions,changedFiles",
+        ]
     )
-    stdout, stderr = await result.communicate()
 
-    if result.returncode != 0:
-        raise Exception(f"Error getting PR details: {stderr.decode()}")
-
-    return json.loads(stdout.decode())
+    return json.loads(json_output)
 
 
-async def get_file_diff(pr_number: str, file_path: str) -> str:
+async def get_file_diff(pr_url: str, file_path: str) -> str:
     """Get the diff for a specific file in a PR.
 
     Args:
-        pr_number: The PR number
+        pr_url: The PR URL or reference
         file_path: The path to the file
 
     Returns:
         The diff content as a string
     """
-    result = await asyncio.create_subprocess_exec(
-        "gh",
-        "pr",
-        "diff",
-        pr_number,
-        "--name-only",
-        stdout=subprocess.PIPE,
-        stderr=subprocess.PIPE,
-    )
-    stdout, stderr = await result.communicate()
 
-    if result.returncode != 0:
-        raise Exception(f"Error getting PR file list: {stderr.decode()}")
+    file_list = await _run_gh_command(["pr", "diff", pr_url, "--name-only"])
 
-    files = stdout.decode().strip().split("\n")
-
+    files = file_list.strip().split("\n")
     if file_path not in files:
-        raise ValueError(f"File {file_path} not found in PR {pr_number}")
+        raise ValueError(f"File {file_path} not found in PR {pr_url}")
 
-    result = await asyncio.create_subprocess_exec(
-        "gh",
-        "pr",
-        "diff",
-        pr_number,
-        file_path,
-        stdout=subprocess.PIPE,
-        stderr=subprocess.PIPE,
-    )
-    stdout, stderr = await result.communicate()
-
-    if result.returncode != 0:
-        raise Exception(f"Error getting file diff: {stderr.decode()}")
-
-    return stdout.decode()
+    return await _run_gh_command(["pr", "diff", pr_url, file_path])
 
 
-async def get_file_content(pr_number: str, file_path: str, base: bool = False) -> str:
+async def get_file_content(pr_url: str, file_path: str, base: bool = False) -> str:
     """Get the content of a file from a PR.
 
     Args:
-        pr_number: The PR number
+        pr_url: The PR URL or reference
         file_path: The path to the file
         base: If True, get the base (before) version, otherwise get the head (after) version
 
     Returns:
         The file content as a string
     """
-    # Try multiple approaches to get file content
-
     # Approach 1: Use gh pr diff to get the file content
     try:
-        # This gets the diff which includes both before and after content
-        result = await asyncio.create_subprocess_exec(
-            "gh",
-            "pr",
-            "diff",
-            pr_number,
-            "--patch",
-            stdout=subprocess.PIPE,
-            stderr=subprocess.PIPE,
-        )
-        stdout, stderr = await result.communicate()
+        diff_content = await _run_gh_command(["pr", "diff", pr_url, "--patch"])
 
-        if result.returncode == 0:
-            diff_content = stdout.decode()
+        file_diffs = diff_content.split("diff --git ")
+        for file_diff in file_diffs:
+            if f"a/{file_path}" in file_diff or f"b/{file_path}" in file_diff:
+                # Found the right file
+                lines = file_diff.splitlines()
+                content_lines = []
+                in_content = False
 
-            # Extract file content from the diff
-            file_diffs = diff_content.split("diff --git ")
-            for file_diff in file_diffs:
-                if f"a/{file_path}" in file_diff or f"b/{file_path}" in file_diff:
-                    # Found the right file
-                    lines = file_diff.splitlines()
-                    content_lines = []
-                    in_content = False
+                for line in lines:
+                    if line.startswith("+++") and base:
+                        in_content = True
+                        continue
+                    elif line.startswith("---") and not base:
+                        in_content = True
+                        continue
 
-                    for line in lines:
-                        if line.startswith("+++") and base:
-                            in_content = True
-                            continue
-                        elif line.startswith("---") and not base:
-                            in_content = True
-                            continue
+                    if in_content:
+                        if line.startswith("+") and not base:
+                            content_lines.append(line[1:])
+                        elif line.startswith("-") and base:
+                            content_lines.append(line[1:])
+                        elif not line.startswith("+") and not line.startswith("-"):
+                            content_lines.append(line)
 
-                        if in_content:
-                            if line.startswith("+") and not base:
-                                content_lines.append(line[1:])
-                            elif line.startswith("-") and base:
-                                content_lines.append(line[1:])
-                            elif not line.startswith("+") and not line.startswith("-"):
-                                content_lines.append(line)
-
-                    if content_lines:
-                        return "\n".join(content_lines)
+                if content_lines:
+                    return "\n".join(content_lines)
     except Exception as e:
         print(f"Approach 1 failed: {e}")
 
     # Approach 2: Use GitHub API to get file content
     try:
-        # First, get the PR branch information
-        result = await asyncio.create_subprocess_exec(
-            "gh",
-            "pr",
-            "view",
-            pr_number,
-            "--json",
-            "baseRefName,headRefName",
-            stdout=subprocess.PIPE,
-            stderr=subprocess.PIPE,
+        branch_json = await _run_gh_command(
+            ["pr", "view", pr_url, "--json", "baseRefName,headRefName"]
         )
-        stdout, stderr = await result.communicate()
 
-        if result.returncode == 0:
-            branch_data = json.loads(stdout.decode())
-            ref = branch_data["baseRefName"] if base else branch_data["headRefName"]
+        branch_data = json.loads(branch_json)
+        ref = branch_data["baseRefName"] if base else branch_data["headRefName"]
 
-            # Then fetch the file content
-            result = await asyncio.create_subprocess_exec(
-                "gh",
-                "api",
-                f"repos/:owner/:repo/contents/{file_path}?ref={ref}",
-                stdout=subprocess.PIPE,
-                stderr=subprocess.PIPE,
-            )
-            stdout, stderr = await result.communicate()
+        content_json = await _run_gh_command(
+            ["api", f"repos/:owner/:repo/contents/{file_path}?ref={ref}"]
+        )
 
-            if result.returncode == 0:
-                content_data = json.loads(stdout.decode())
-                import base64
+        content_data = json.loads(content_json)
+        import base64
 
-                return base64.b64decode(content_data["content"]).decode("utf-8")
+        return base64.b64decode(content_data["content"]).decode("utf-8")
     except Exception as e:
         print(f"Approach 2 failed: {e}")
 
     # Approach 3: Use a simpler fallback approach
     try:
-        # Create a simplified version based on the PR description
         if base:
             return f"// Original content of {file_path}\n// This is a placeholder for demonstration purposes"
         else:
@@ -188,7 +151,6 @@ async def get_file_content(pr_number: str, file_path: str, base: bool = False) -
     except Exception as e:
         print(f"Approach 3 failed: {e}")
 
-    # If all approaches fail, return a minimal placeholder
     return f"// Content of {file_path} (not available)"
 
 
@@ -233,81 +195,53 @@ The system prompt should be concise but comprehensive, focusing on the patterns 
 
 
 async def extract_example_patterns(
-    pr_number: str, pr_details: Dict
+    pr_url: str, pr_details: Dict
 ) -> List[Tuple[str, str]]:
     """Extract example patterns from a PR.
-
-    Args:
-        pr_number: The PR number
-        pr_details: The PR details
 
     Returns:
         A list of (before, after) example pairs
     """
     client = DefaultClient()
 
-    # Get a sample of changed files (max 5 for analysis)
     files_to_analyze = pr_details.get("files", [])
     if not files_to_analyze and "changedFiles" in pr_details:
-        # If 'files' is not available, try to get file list using another method
-        result = await asyncio.create_subprocess_exec(
-            "gh",
-            "pr",
-            "view",
-            pr_number,
-            "--json",
-            "files",
-            stdout=subprocess.PIPE,
-            stderr=subprocess.PIPE,
-        )
-        stdout, stderr = await result.communicate()
-
-        if result.returncode == 0:
-            files_data = json.loads(stdout.decode())
+        try:
+            files_json = await _run_gh_command(
+                ["pr", "view", pr_url, "--json", "files"]
+            )
+            files_data = json.loads(files_json)
             files_to_analyze = files_data.get("files", [])
+        except Exception:
+            pass
 
-    # If still no files, try to get files from diff
     if not files_to_analyze:
         try:
-            result = await asyncio.create_subprocess_exec(
-                "gh",
-                "pr",
-                "diff",
-                pr_number,
-                "--name-only",
-                stdout=subprocess.PIPE,
-                stderr=subprocess.PIPE,
-            )
-            stdout, stderr = await result.communicate()
-
-            if result.returncode == 0:
-                file_paths = stdout.decode().strip().split("\n")
-                files_to_analyze = [{"path": path} for path in file_paths]
+            file_paths = await _run_gh_command(["pr", "diff", pr_url, "--name-only"])
+            files_to_analyze = [
+                {"path": path} for path in file_paths.strip().split("\n")
+            ]
         except Exception as e:
             print(f"Error getting files from diff: {e}")
 
-    # Limit to 5 files for analysis
     files_to_analyze = files_to_analyze[:5]
 
     examples = []
     for file_info in files_to_analyze:
-        # Skip if we can't determine the file path
         if not isinstance(file_info, dict) or "path" not in file_info:
             continue
 
         file_path = file_info["path"]
 
-        # Skip if file was added or deleted
         if "status" in file_info and (
             file_info["status"] == "added" or file_info["status"] == "deleted"
         ):
             continue
 
         try:
-            before_content = await get_file_content(pr_number, file_path, base=True)
-            after_content = await get_file_content(pr_number, file_path, base=False)
+            before_content = await get_file_content(pr_url, file_path, base=True)
+            after_content = await get_file_content(pr_url, file_path, base=False)
 
-            # Skip if we couldn't get meaningful content
             if "not available" in before_content and "not available" in after_content:
                 print(f"Skipping {file_path} - content not available")
                 continue
@@ -337,7 +271,6 @@ Respond with two code blocks labeled BEFORE and AFTER containing your minimal ex
 
             response = await client.generate_text(system_prompt, user_prompt)
 
-            # Extract the before and after examples from the response
             before_match = re.search(r"BEFORE:\s*```.*?\n(.*?)```", response, re.DOTALL)
             after_match = re.search(r"AFTER:\s*```.*?\n(.*?)```", response, re.DOTALL)
 
@@ -348,7 +281,6 @@ Respond with two code blocks labeled BEFORE and AFTER containing your minimal ex
         except Exception as e:
             print(f"Error processing file {file_path}: {e}")
 
-    # If we couldn't extract any examples, create a simple one based on the PR title and description
     if not examples and pr_details.get("title") and pr_details.get("body"):
         try:
             system_prompt = """You are an expert at creating code examples for migration patterns.
@@ -366,7 +298,6 @@ The examples should be minimal but clearly demonstrate the key changes involved 
 
             response = await client.generate_text(system_prompt, user_prompt)
 
-            # Extract the before and after examples from the response
             before_match = re.search(r"BEFORE:\s*```.*?\n(.*?)```", response, re.DOTALL)
             after_match = re.search(r"AFTER:\s*```.*?\n(.*?)```", response, re.DOTALL)
 
@@ -447,7 +378,6 @@ Focus on creating a practical verification script that checks for the key aspect
 
     verify_script = await client.generate_text(system_prompt, user_prompt)
 
-    # Extract just the Python code if it's wrapped in a code block
     code_match = re.search(r"```python\n(.*?)```", verify_script, re.DOTALL)
     if code_match:
         verify_script = code_match.group(1)
@@ -456,19 +386,18 @@ Focus on creating a practical verification script that checks for the key aspect
 
 
 async def setup_project_from_pr(
-    pr_number: str, project_path: str, description: str, file_extension: str = "java"
+    pr_url: str, project_path: str, description: str, file_extension: str = "java"
 ) -> None:
     """Set up a migration project based on a PR.
 
     Args:
-        pr_number: The PR number
+        pr_url: The PR URL or reference (e.g., 'https://github.com/owner/repo/pull/123' or 'owner/repo#123')
         project_path: Path where the project should be created
         description: Short description of the migration task
         file_extension: File extension for the migrated files
     """
     project_dir = Path(project_path).expanduser()
 
-    # Create project directory structure
     project_dir.mkdir(parents=True, exist_ok=True)
     examples_dir = project_dir / "examples"
     examples_dir.mkdir(exist_ok=True)
@@ -478,25 +407,21 @@ async def setup_project_from_pr(
     print(f"Created project directory structure at {project_dir}")
 
     try:
-        # Get PR details
-        print(f"Fetching PR #{pr_number} details...")
-        pr_details = await get_pr_details(pr_number)
+        print("Fetching PR details...")
+        pr_details = await get_pr_details(pr_url)
 
-        # Generate system prompt
         print("Generating system prompt...")
         system_prompt = await generate_system_prompt(pr_details, description)
         system_prompt_file = project_dir / "system_prompt.md"
         system_prompt_file.write_text(system_prompt)
         print(f"Saved system prompt to {system_prompt_file}")
 
-        # Extract and save example patterns
         print("Extracting example patterns...")
-        examples = await extract_example_patterns(pr_number, pr_details)
+        examples = await extract_example_patterns(pr_url, pr_details)
         if not examples:
             print(
                 "Warning: No example patterns were extracted. Creating a simple example..."
             )
-            # Create a simple example if none were extracted
             examples = [
                 (
                     "// Old version\npublic class Example {\n    // TODO: Add your code here\n}",
@@ -505,7 +430,6 @@ async def setup_project_from_pr(
             ]
         await save_examples(examples, examples_dir, file_extension)
 
-        # Generate verification script
         print("Generating verification script...")
         verify_script = await generate_verify_script(
             pr_details, project_dir, file_extension
@@ -517,18 +441,15 @@ async def setup_project_from_pr(
         print(f"Project setup complete at {project_dir}")
     except Exception as e:
         print(f"Error during project setup: {e}")
-        # Create minimal files if something went wrong
         from .migrate import SYSTEM_MESSAGE
         from .manifest import SYSTEM_PROMPT_FILE, VERIFY_SCRIPT_FILE
 
-        # Create minimal system prompt
         system_prompt_file = project_dir / SYSTEM_PROMPT_FILE
         if not system_prompt_file.exists():
             system_prompt = f"{SYSTEM_MESSAGE}\n\n# Migration Task\n\n{description}"
             system_prompt_file.write_text(system_prompt)
             print(f"Created minimal system prompt at {system_prompt_file}")
 
-        # Create minimal verify script
         verify_script_file = project_dir / VERIFY_SCRIPT_FILE
         if not verify_script_file.exists():
             verify_script = (
