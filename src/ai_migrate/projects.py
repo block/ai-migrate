@@ -14,6 +14,7 @@ from .manifest import (
     SYSTEM_PROMPT_FILE,
     VERIFY_SCRIPT_FILE,
     FileGroup,
+    Directory,
 )
 from .migrate import run as run_migration, SYSTEM_MESSAGE, FailedPreVerification
 from .progress import StatusManager
@@ -30,12 +31,16 @@ def get_git_sha(directory: str | Path) -> str:
     return res.stdout.decode().strip()
 
 
-def normalize_file_group(file_or_group: FileEntry | FileGroup) -> FileGroup:
-    if isinstance(file_or_group, FileGroup):
-        return file_or_group
+def normalize_file_group(
+    file_dir_group: FileEntry | FileGroup | Directory,
+) -> FileGroup:
+    if isinstance(file_dir_group, FileGroup):
+        return file_dir_group
+    if isinstance(file_dir_group, Directory):
+        return file_dir_group.to_file_group()
     return FileGroup(
-        files=[file_or_group.filename],
-        result=file_or_group.result,
+        files=[file_dir_group.filename],
+        result=file_dir_group.result,
     )
 
 
@@ -77,7 +82,6 @@ async def run(
         git_manifest = manifest_from_git()
         manifest = merge_manifests(manifest, git_manifest)
 
-    my_sha = get_git_sha(Path(__file__).parent)
     target_sha = None
 
     results: list[FileGroup] = []
@@ -125,6 +129,8 @@ async def run(
                 log_stream=log_buffer,
                 local_worktrees=local_worktrees,
                 llm_fakes=llm_fakes,
+                target_dir=manifest.target_dir,
+                target_basename=files.base_name,
             )
             new_result = "pass"
             await status_manager.mark_passed(task_name)
@@ -179,8 +185,7 @@ async def run(
         result_manifest = manifest.model_copy(
             update={
                 "files": results,
-                "target_repo_ref": target_sha,
-                "migrate_repo_ref": my_sha,
+                "eval_target_repo_ref": target_sha,
                 "time": datetime.now(),
             }
         )
