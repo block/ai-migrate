@@ -120,14 +120,14 @@ def run_project_eval(project, verbose=False):
             manifest = Manifest.model_validate_json(manifest_file.read_text())
             logger.info(f"Manifest loaded with {len(manifest.files)} file entries")
 
-            if manifest.target_repo_remote and manifest.target_repo_ref:
+            if manifest.eval_target_repo_remote and manifest.eval_target_repo_ref:
                 logger.info(
-                    f"Cloning target repo: {manifest.target_repo_remote} @ {manifest.target_repo_ref}"
+                    f"Cloning target repo: {manifest.eval_target_repo_remote} @ {manifest.eval_target_repo_ref}"
                 )
-                ws.sh(f"git clone --depth=1 {manifest.target_repo_remote} repo")
+                ws.sh(f"git clone --depth=1 {manifest.eval_target_repo_remote} repo")
                 ws.pushd("repo")
-                ws.sh(f"git fetch --depth 1 origin {manifest.target_repo_ref}")
-                ws.sh(f"git checkout {manifest.target_repo_ref}")
+                ws.sh(f"git fetch --depth 1 origin {manifest.eval_target_repo_ref}")
+                ws.sh(f"git checkout {manifest.eval_target_repo_ref}")
             else:
                 logger.info(f"Using local source files from: {directory / 'source'}")
                 shutil.copytree(directory / "source", ws.working_dir / "repo")

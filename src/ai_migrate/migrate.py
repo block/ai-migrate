@@ -18,15 +18,22 @@ from .resolve_symbols import get_symbol_definition
 
 FN_LOOKUP_SYMBOL = "lookup_symbol_definition"
 
+LOOKUP_SYMBOL_PROMPT = (
+    "Do not include any explanations or comments outside the code block.\n"
+    "Do not assume functionality of classes or functions that you haven't seen in the examples. "
+    f"Instead use the provided tool '{FN_LOOKUP_SYMBOL}' to look up the definition of a symbol.\n"
+    "You want to produce code that you can guarantee to compile, so use this tool whenever you are unsure."
+)
+
+if os.environ.get("AI_MIGRATE_DISABLE_TOOLS", "").lower() in ("true", "1", "yes"):
+    LOOKUP_SYMBOL_PROMPT = ""
+
 SYSTEM_MESSAGE = (
     "You are an expert at migrating source code to modern standards. "
     "For each example pair you see, understand the patterns of modernization applied. "
     "Then apply similar modernization patterns to the target code while preserving its functionality. "
     "Provide only the migrated code between triple backticks (```). "
-    "Do not include any explanations or comments outside the code block.\n"
-    "Do not assume functionality of classes or functions that you haven't seen in the examples. "
-    f"Instead use the provided tool '{FN_LOOKUP_SYMBOL}' to look up the definition of a symbol.\n"
-    "You want to produce code that you can guarantee to compile, so use this tool whenever you are unsure."
+    f"{LOOKUP_SYMBOL_PROMPT}"
 )
 
 
@@ -285,7 +292,11 @@ def messages_and_tools(
 
     messages.extend(migrate_prompt(target))
 
-    return messages, TOOL_DEFINITIONS
+    # Check if tool calling should be disabled
+    if os.environ.get("AI_MIGRATE_DISABLE_TOOLS", "").lower() in ("true", "1", "yes"):
+        return messages, []
+    else:
+        return messages, TOOL_DEFINITIONS
 
 
 async def call_llm(
@@ -331,9 +342,8 @@ async def subprocess_run(cmd, prefix=None, **kwargs) -> str:
         kwargs["stderr"] = subprocess.STDOUT
         kwargs["stdout"] = subprocess.PIPE
     check = False
-    if kwargs.get("check"):
-        check = True
-        del kwargs["check"]
+    if "check" in kwargs:
+        check = kwargs.pop("check")
     env = kwargs.pop("env", {})
     env = {**os.environ, "PYTHONUNBUFFERED": "1", **env}
     process = await asyncio.create_subprocess_exec(
@@ -366,20 +376,62 @@ async def run(
     log_stream,
     local_worktrees,
     llm_fakes,
+    target_dir: str = "",
+    target_basename: str = "",
 ):
     if log_stream:
         LOG_STREAM.set(log_stream)
 
-    git_root = Path(
+    source_git_root = Path(
         (
             await subprocess_run(["git", "rev-parse", "--show-toplevel"], check=True)
         ).strip()
     )
-    start_point = (
+    source_start_point = (
         await subprocess_run(["git", "rev-parse", "HEAD"], check=True)
     ).strip()
+
+    # If target_dir is specified, use it as the git root for the output
+    if target_dir:
+        target_dir_path = Path(target_dir)
+        try:
+            if not target_dir_path.exists():
+                target_dir_path.mkdir(parents=True, exist_ok=True)
+
+            target_git_root = Path(
+                (
+                    await subprocess_run(
+                        ["git", "rev-parse", "--show-toplevel"],
+                        check=True,
+                        cwd=str(target_dir_path),
+                    )
+                ).strip()
+            )
+            start_point = (
+                await subprocess_run(
+                    ["git", "rev-parse", "HEAD"], check=True, cwd=str(target_git_root)
+                )
+            ).strip()
+
+            target_dir_rel_path = target_dir_path.resolve().relative_to(
+                target_git_root.resolve()
+            )
+
+            git_root = target_git_root
+        except Exception as e:
+            log(f"Error finding git repository: {e}")
+            raise ValueError(
+                f"Error: target_dir '{target_dir}' is not in a git repository."
+            )
+    else:
+        # Use the source repository as the git root
+        git_root = source_git_root
+        start_point = source_start_point
+        target_dir_rel_path = None
+
+    # Get the relative paths of the target files
     targets_in_repo = [
-        Path(target_file).resolve().relative_to(git_root)
+        Path(target_file).resolve().relative_to(source_git_root)
         for target_file in target_files
     ]
 
@@ -390,6 +442,7 @@ async def run(
     else:
         worktree_root = Path(tempfile.gettempdir()) / worktree_name
     branch = f"ai-migrator/{file_flat}"
+
     if not worktree_root.exists():
         await subprocess_run(
             ["git", "worktree", "add", worktree_root, "HEAD"],
@@ -402,18 +455,21 @@ async def run(
         cwd=worktree_root,
     )
 
-    targets_in_worktree = [
-        worktree_root / target_in_repo for target_in_repo in targets_in_repo
-    ]
+    # If using target_dir, read files from original location instead of worktree
+    target_root = source_git_root if target_dir else worktree_root
+    targets_files = [target_root / target_in_repo for target_in_repo in targets_in_repo]
 
     return await _run(
-        targets_in_worktree,
+        targets_files,
         system_prompt,
         examples_dir,
         verify_cmd,
         pre_verify_cmd,
         worktree_root,
         llm_fakes,
+        target_dir=target_dir,
+        target_dir_rel_path=target_dir_rel_path,
+        target_basename=target_basename,
     )
 
 
@@ -471,6 +527,9 @@ async def _run(
     pre_verify_cmd,
     worktree_root,
     llm_fakes,
+    target_dir=None,
+    target_dir_rel_path=None,
+    target_basename=None,
 ):
     if llm_fakes:
         client = FakeLLMClient(llm_fakes)
@@ -485,14 +544,26 @@ async def _run(
 
     system_prompt = Path(system_prompt).read_text()
 
+    # TODO: Have some kind of configuration driven controls for how basename is transformed
+    if target_basename:
+        target_basename = (
+            target_basename.replace("-", " ").replace("_", " ").title().replace(" ", "")
+        )
+
     # Create target MigrationExample
     target_file_contents = []
-    for target_file in target_files:
+    for i, target_file in enumerate(target_files):
         full_path = Path(target_file).absolute()
-        short_name = full_path.relative_to(worktree_root)
-        target_file_contents.append(
-            FileContent(name=str(short_name), content=full_path.read_text())
-        )
+
+        if target_dir:
+            read_path = Path(target_files[i]).absolute()
+            short_name = full_path.name
+            content = read_path.read_text()
+        else:
+            short_name = full_path.relative_to(worktree_root)
+            content = full_path.read_text()
+
+        target_file_contents.append(FileContent(name=str(short_name), content=content))
 
     target = MigrationExample(name=None, old_files=target_file_contents, new_files=[])
 
@@ -517,14 +588,16 @@ async def _run(
                     f"file {target_files} failed pre-verification"
                 )
 
-        for target_file in target_files:
-            os.remove(target_file)
-            await subprocess_run(
-                ["git", "add", target_file],
-                cwd=worktree_root,
-            )
+        if not target_dir:
+            for target_file in target_files:
+                os.remove(target_file)
+                await subprocess_run(
+                    ["git", "add", target_file],
+                    cwd=worktree_root,
+                )
 
         for tries in range(int(os.getenv("AI_MIGRATE_MAX_TRIES", 10))):
+            log(f"[agent] Running migration attempt {tries + 1}")
             response, messages = await call_llm(client, messages, tools)
 
             response_text = response["choices"][0]["message"]["content"]
@@ -549,14 +622,34 @@ async def _run(
 
                 if code_block.filename:
                     written_files.add(code_block.filename)
-                    with open(Path(worktree_root) / code_block.filename, "w") as f:
+                    if target_dir:
+                        output_path = (
+                            Path(worktree_root)
+                            / target_dir_rel_path
+                            / target_basename
+                            / code_block.filename
+                        )
+                    else:
+                        output_path = Path(worktree_root) / code_block.filename
+                    output_path.parent.mkdir(parents=True, exist_ok=True)
+
+                    with open(output_path, "w") as f:
                         f.write(migrated_code)
 
             all_files_to_verify |= written_files
-            full_verify_cmd = [
-                *verify_cmd,
-                *[str(Path(worktree_root) / f) for f in all_files_to_verify],
-            ]
+
+            # Add the files to verify with the correct paths
+            if target_dir:
+                full_verify_cmd = [
+                    *verify_cmd,
+                    str(Path(target_dir_rel_path) / target_basename),
+                ]
+            else:
+                full_verify_cmd = [
+                    *verify_cmd,
+                    *[str(Path(worktree_root) / f) for f in all_files_to_verify],
+                ]
+
             log(f"Running verification: {full_verify_cmd}")
             verify_process = await asyncio.create_subprocess_exec(
                 *full_verify_cmd,
@@ -567,13 +660,28 @@ async def _run(
             stdout, stderr = await verify_process.communicate()
 
             status = "pass" if verify_process.returncode == 0 else "fail"
+
             commit_message = f"Migration attempt {tries + 1} {status=}:\n\nLLM response:\n{parsed_result.other_text}"
 
             for file in written_files:
-                await subprocess_run(
-                    ["git", "add", file],
-                    cwd=worktree_root,
-                )
+                if target_dir:
+                    file_path = (
+                        Path(worktree_root)
+                        / target_dir_rel_path
+                        / target_basename
+                        / file
+                    )
+                    git_path = Path(file_path).relative_to(worktree_root)
+                    await subprocess_run(
+                        ["git", "add", git_path],
+                        cwd=worktree_root,
+                    )
+                else:
+                    await subprocess_run(
+                        ["git", "add", file],
+                        cwd=worktree_root,
+                    )
+
             await subprocess_run(
                 ["git", "commit", "--allow-empty", "-m", commit_message],
                 check=True,
@@ -602,16 +710,28 @@ async def _run(
             log("Verification failed:")
             for line in verification_output.splitlines():
                 log(f"[verify] {line}")
+
+            lookup_symbol_prompt = (
+                f"Use the {FN_LOOKUP_SYMBOL} tool to find the definition of any symbols related to this problem. "
+                "Then apply the necessary changes to the code. Don't guess or assume functionality."
+                "From now on, only re-write files, don't rename them."
+            )
+            if os.environ.get("AI_MIGRATE_DISABLE_TOOLS", "").lower() in (
+                "true",
+                "1",
+                "yes",
+            ):
+                lookup_symbol_prompt = ""
+
             messages.append({"role": ROLE_ASSISTANT, "content": response_text})
             messages.append(
                 {
                     "role": ROLE_USER,
                     "content": f"The code did not compile. The error was: {verification_output}. "
-                    f"Use the {FN_LOOKUP_SYMBOL} tool to find the definition of any symbols related to this problem. "
-                    "Then apply the necessary changes to the code. Don't guess or assume functionality."
-                    "From now on, only re-write files, don't rename them.",
+                    f"{lookup_symbol_prompt}",
                 }
             )
+
         else:
             raise ValueError("Migration failed")
     finally:

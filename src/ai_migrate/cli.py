@@ -162,8 +162,8 @@ async def generate_evals_from_pr(pr_number: str, project_path: str) -> None:
 
     # Create manifest file
     manifest = {
-        "target_repo_remote": "org-49461806@github.com:owner/repo.git",  # This will be a placeholder
-        "target_repo_ref": base_ref or "",
+        "eval_target_repo_remote": "org-49461806@github.com:owner/repo.git",  # This will be a placeholder
+        "eval_target_repo_ref": base_ref or "",
         "files": [
             {"filename": file_path, "result": "?"} for file_path in changed_files[:10]
         ],  # Limit to 10 files
@@ -190,7 +190,9 @@ async def generate_evals_from_pr(pr_number: str, project_path: str) -> None:
                 # Convert HTTPS URL to SSH format for the manifest
                 if repo_url.startswith("https://github.com/"):
                     org_repo = repo_url.replace("https://github.com/", "")
-                    manifest["target_repo_remote"] = f"git@github.com:{org_repo}.git"
+                    manifest["eval_target_repo_remote"] = (
+                        f"git@github.com:{org_repo}.git"
+                    )
     except Exception as e:
         print(f"Error getting repo URL: {e}")
 
@@ -749,7 +751,7 @@ def init(interactive):
 
 def project_dir_option(f):
     def project_dir_validate(_ctx, param, project_dir):
-        if param.name == "project_dir":
+        if param.name == "project_dir" and project_dir:
             project_dir = Path(__file__).parent.parent.parent / "projects" / project_dir
 
         if not project_dir:
