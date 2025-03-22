@@ -4,8 +4,6 @@ import re
 from pathlib import Path
 import subprocess
 
-import fire
-
 
 def get_git_file_content(file: str, ref: str) -> str | None:
     result = subprocess.run(
@@ -123,7 +121,3 @@ def setup(ref, ref_prev=None, examples_dir="examples", pattern=None) -> None:
             if content:
                 out_file = out_dir / f"{group_name}.{ext}" / path_to_name(file)
                 out_file.write_text(content)
-
-
-if __name__ == "__main__":
-    fire.Fire(setup)
