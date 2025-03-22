@@ -1,4 +1,12 @@
 name: Publish to PyPI
+#
+#on:
+#  release:
+#    types: [published]
+on:
+  push:
+    branches:
+      - pypi-package
 
 jobs:
   publish:
@@ -14,4 +22,4 @@ jobs:
       - name: Build and Publish
         run: |
           uv build
-          uv publish
+          uv publish --index testpypi
