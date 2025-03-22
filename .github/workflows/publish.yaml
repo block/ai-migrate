@@ -8,6 +8,9 @@ on:
     branches:
       - pypi-package
 
+permissions:
+  id-token: write
+
 jobs:
   publish:
     name: Publish
