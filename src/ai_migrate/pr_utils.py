@@ -142,16 +142,7 @@ async def get_file_content(pr_url: str, file_path: str, base: bool = False) -> s
     except Exception as e:
         print(f"Approach 2 failed: {e}")
 
-    # Approach 3: Use a simpler fallback approach
-    try:
-        if base:
-            return f"// Original content of {file_path}\n// This is a placeholder for demonstration purposes"
-        else:
-            return f"// Modified content of {file_path}\n// This is a placeholder for demonstration purposes"
-    except Exception as e:
-        print(f"Approach 3 failed: {e}")
-
-    return f"// Content of {file_path} (not available)"
+    raise ValueError(f"Unable to retrieve content for {file_path}")
 
 
 async def generate_system_prompt(pr_details: Dict, description: str) -> str:

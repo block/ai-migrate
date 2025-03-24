@@ -126,7 +126,7 @@ def read_file_pairs_from(examples_dir: str | Path) -> Iterable[MigrationExample]
     ]
 
     for old_dir in old_dirs:
-        base_name = old_dir.name[:-4]
+        base_name = old_dir.name.removesuffix(".old")
         new_dir = old_dir.parent / f"{base_name}.new"
 
         if new_dir.exists() and new_dir.is_dir():
@@ -399,10 +399,6 @@ async def run(
     source_start_point = (
         await subprocess_run(["git", "rev-parse", "HEAD"], check=True)
     ).strip()
-
-    # Define target_dir_rel_path
-    target_dir_rel_path = None
-
 
     # If target_dir is specified, use it as the git root for the output
     if target_dir:

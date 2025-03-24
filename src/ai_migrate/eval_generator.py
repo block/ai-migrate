@@ -90,11 +90,10 @@ def extract_repo_info_from_url(url: str) -> RepoInfo:
     elif "/pull/" in url:
         info.pr_number = url.split("/pull/")[-1]
 
-    if info.pr_number:
-        if not info.pr_number.isdigit():
-            logger.warning(
-                f"PR number '{info.pr_number}' contains non-numeric characters. Using as is."
-            )
+    if info.pr_number and not info.pr_number.isdigit():
+        logger.warning(
+            f"PR number '{info.pr_number}' contains non-numeric characters. Using as is."
+        )
 
     if "/" in url:
         parts = url.split("/")
