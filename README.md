@@ -178,7 +178,17 @@ The new CLI adds these capabilities not present in the main branch:
    # Interactive dialog for viewing, editing, or generating system prompts
    ```
 
-4. **Rich Help System**:
+4. **Automatic Evaluation Generation**:
+
+   ```bash
+   # Disable automatic evaluation generation
+   uv run ai-migrate migrate --dont-create-evals <file_paths>
+
+   # Manage evaluations
+   uv run ai-migrate migrate --manage evals
+   ```
+
+5. **Rich Help System**:
    ```bash
    uv run ai-migrate --help
    uv run ai-migrate <command> --help
@@ -205,6 +215,7 @@ eval "$(./bin/hermit env)"
 Additional documentation is available in the `docs/` directory:
 
 - [Evaluation Runner](docs/eval_runner.md) - Documentation for the evaluation runner system
+- [Automatic Evaluation Generation](docs/eval_improvement.md) - Documentation for the automatic evaluation generation feature
 
 ## AI-Powered Project Setup
 
@@ -269,10 +280,12 @@ The new interactive CLI provides a more user-friendly experience with:
    - `migrate` - Migrate one or more files or manage project resources
      - Use `--manage examples` to manage example files
      - Use `--manage system-prompt` to view or edit the system prompt
+     - Use `--manage evals` to manage evaluation test cases
      - Use `--manifest-file` to specify a manifest file for batch processing
      - Use `--rerun-passed` to re-run migrations that have already passed
      - Use `--max-workers` to set the maximum number of parallel workers
      - Use `--local-worktrees` to create worktrees alongside the git repo
+     - Use `--dont-create-evals` to disable automatic evaluation generation
    - `status` - Show the status of migration projects
      - See which files are passing, failing, or have not been processed
    - `checkout` - Check out the branch for a failed migration attempt
@@ -307,3 +320,37 @@ uv run ai-migrate merge-branches
 # Get help for a specific command
 uv run ai-migrate migrate --help
 ```
+
+## Automatic Evaluation Generation
+
+The tool now automatically creates evaluation test cases from successful migrations. This helps build a comprehensive test suite and ensures that future versions of the migration system continue to work correctly.
+
+### How It Works
+
+1. When a migration succeeds (passes verification), the system:
+   - Captures the original source files before migration
+   - Creates a new directory in the `evals` directory with a timestamp-based name
+   - Saves the original files in the `source` subdirectory
+   - Creates a manifest file with the verification command and file information
+
+2. These evaluations can then be used to:
+   - Test future versions of the migration system
+   - Ensure that regressions don't occur
+   - Benchmark performance and accuracy
+
+### Usage
+
+By default, evaluations are automatically created for every successful migration. You can:
+
+```bash
+# Disable automatic evaluation creation
+uv run ai-migrate migrate --dont-create-evals <file_paths>
+
+# Manage evaluations
+uv run ai-migrate migrate --manage evals
+```
+
+The evaluation management interface allows you to:
+- List existing evaluations with details like file count and creation date
+- Generate evaluations from a GitHub Pull Request
+- Generate evaluations from recent successful migrations

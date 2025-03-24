@@ -39,173 +39,12 @@ from .pr_utils import (
 )
 from .manifest import SYSTEM_PROMPT_FILE, Manifest
 from .migrate import SYSTEM_MESSAGE
+from .eval_generator import generate_eval_from_pr
 from ai_migrate.llm_providers import DefaultClient
 from .examples import setup as setup_examples, setup_from_pr
 
-# Check if we're in an interactive terminal
 IS_INTERACTIVE = sys.stdin.isatty()
 
-
-async def generate_evals_from_pr(pr_number: str, project_path: str) -> None:
-    """Generate evaluation files from a PR.
-
-    Args:
-        pr_number: The PR number
-        project_path: Path to the project directory
-    """
-    project_dir = Path(project_path).expanduser()
-    evals_dir = project_dir / "evals"
-    evals_dir.mkdir(exist_ok=True)
-
-    # Create a directory for this specific eval
-    pr_details = await get_pr_details(pr_number)
-
-    # Extract repo name from PR details or use a default name
-    repo_name = "repo"
-    try:
-        # Try to extract repo name from PR URL or other details
-        if "url" in pr_details:
-            url_parts = pr_details["url"].split("/")
-            if len(url_parts) >= 2:
-                repo_name = url_parts[-3]
-        elif "headRepository" in pr_details and "name" in pr_details["headRepository"]:
-            repo_name = pr_details["headRepository"]["name"]
-    except Exception:
-        # If extraction fails, use a generic name
-        repo_name = f"pr-{pr_number}"
-
-    eval_dir = evals_dir / repo_name
-    eval_dir.mkdir(exist_ok=True)
-
-    # Get base and head commit references
-    base_ref = None
-    head_ref = None
-
-    try:
-        # Get the PR branch information
-        result = await asyncio.create_subprocess_exec(
-            "gh",
-            "pr",
-            "view",
-            pr_number,
-            "--json",
-            "baseRefName,headRefName,baseRefOid,headRefOid",
-            stdout=subprocess.PIPE,
-            stderr=subprocess.PIPE,
-        )
-        stdout, stderr = await result.communicate()
-
-        if result.returncode == 0:
-            branch_data = json.loads(stdout.decode())
-            base_ref = branch_data.get("baseRefOid")
-            head_ref = branch_data.get("headRefOid")
-
-            if not base_ref or not head_ref:
-                # Try to get the commit SHAs directly
-                base_branch = branch_data.get("baseRefName")
-                head_branch = branch_data.get("headRefName")
-
-                if base_branch:
-                    # Get base commit SHA
-                    result = await asyncio.create_subprocess_exec(
-                        "gh",
-                        "api",
-                        f"repos/:owner/:repo/commits/{base_branch}",
-                        stdout=subprocess.PIPE,
-                        stderr=subprocess.PIPE,
-                    )
-                    stdout, stderr = await result.communicate()
-                    if result.returncode == 0:
-                        commit_data = json.loads(stdout.decode())
-                        base_ref = commit_data.get("sha")
-
-                if head_branch:
-                    # Get head commit SHA
-                    result = await asyncio.create_subprocess_exec(
-                        "gh",
-                        "api",
-                        f"repos/:owner/:repo/commits/{head_branch}",
-                        stdout=subprocess.PIPE,
-                        stderr=subprocess.PIPE,
-                    )
-                    stdout, stderr = await result.communicate()
-                    if result.returncode == 0:
-                        commit_data = json.loads(stdout.decode())
-                        head_ref = commit_data.get("sha")
-    except Exception as e:
-        print(f"Error getting PR commit references: {e}")
-
-    # Get list of files from the PR
-    changed_files = []
-    try:
-        result = await asyncio.create_subprocess_exec(
-            "gh",
-            "pr",
-            "view",
-            pr_number,
-            "--json",
-            "files",
-            stdout=subprocess.PIPE,
-            stderr=subprocess.PIPE,
-        )
-        stdout, stderr = await result.communicate()
-
-        if result.returncode == 0:
-            files_data = json.loads(stdout.decode())
-            if "files" in files_data and isinstance(files_data["files"], list):
-                changed_files = [
-                    file_info["path"]
-                    for file_info in files_data["files"]
-                    if isinstance(file_info, dict) and "path" in file_info
-                ]
-    except Exception as e:
-        print(f"Error getting PR files: {e}")
-
-    # Create manifest file
-    manifest = {
-        "eval_target_repo_remote": "org-49461806@github.com:owner/repo.git",  # This will be a placeholder
-        "eval_target_repo_ref": base_ref or "",
-        "files": [
-            {"filename": file_path, "result": "?"} for file_path in changed_files[:10]
-        ],  # Limit to 10 files
-    }
-
-    # Try to get the actual repo URL
-    try:
-        result = await asyncio.create_subprocess_exec(
-            "gh",
-            "pr",
-            "view",
-            pr_number,
-            "--json",
-            "headRepository",
-            stdout=subprocess.PIPE,
-            stderr=subprocess.PIPE,
-        )
-        stdout, stderr = await result.communicate()
-
-        if result.returncode == 0:
-            repo_data = json.loads(stdout.decode())
-            if "headRepository" in repo_data and "url" in repo_data["headRepository"]:
-                repo_url = repo_data["headRepository"]["url"]
-                # Convert HTTPS URL to SSH format for the manifest
-                if repo_url.startswith("https://github.com/"):
-                    org_repo = repo_url.replace("https://github.com/", "")
-                    manifest["eval_target_repo_remote"] = (
-                        f"git@github.com:{org_repo}.git"
-                    )
-    except Exception as e:
-        print(f"Error getting repo URL: {e}")
-
-    # Write manifest file
-    manifest_file = eval_dir / "manifest.json"
-    with open(manifest_file, "w") as f:
-        json.dump(manifest, f, indent=2)
-
-    return manifest_file
-
-
-# Initialize Rich console
 console = Console()
 
 
@@ -227,24 +66,20 @@ def console_radiolist(title: str, text: str, values: list) -> str:
     console.print()
 
     for i, (value, description) in enumerate(values, 1):
-        # Display the value and description without square brackets to avoid Rich markup issues
         console.print(f"[bold cyan]{i}.[/bold cyan] {value} - {description}")
 
     console.print()
 
-    # If not in an interactive terminal, require an explicit option parameter
     if not IS_INTERACTIVE:
-        # Check if an option was provided via environment variable
         option = os.environ.get("AI_MIGRATE_OPTION")
         if option:
-            # Find the matching option in values
             for value, _ in values:
                 if value == option:
                     console.print(
                         f"[yellow]Not in interactive terminal. Using provided option: {option}[/yellow]"
                     )
                     return value
-            # If option doesn't match any value, show error
+
             console.print(
                 f"[red]Error: Provided option '{option}' is not valid. Available options: {[v[0] for v in values]}[/red]"
             )
@@ -276,9 +111,7 @@ def console_yes_no(title: str, text: str) -> bool:
     console.print(text)
     console.print()
 
-    # If not in an interactive terminal, require an explicit option parameter
     if not IS_INTERACTIVE:
-        # Check if an option was provided via environment variable
         option = os.environ.get("AI_MIGRATE_YES_NO")
         if option:
             if option.lower() in ("y", "yes", "true"):
@@ -359,11 +192,10 @@ def show_success_message(message: str):
 
 def show_error_message(message: str, error=None):
     """Show an error message."""
-    # Escape any square brackets in the message to prevent Rich markup interpretation
+
     safe_message = message.replace("[", "\\[").replace("]", "\\]")
     console.print(f"[red]✗[/red] {safe_message}")
     if error:
-        # Escape any square brackets in the error to prevent Rich markup interpretation
         safe_error = str(error).replace("[", "\\[").replace("]", "\\]")
         console.print(f"[red]Error details:[/red] {safe_error}")
 
@@ -380,7 +212,6 @@ def manage_examples(project_dir: Path):
         show_error_message(f"Examples directory {examples_dir} does not exist.")
         return
 
-    # Show options
     action = console_radiolist(
         title="Examples Management",
         text="What would you like to do?",
@@ -396,7 +227,6 @@ def manage_examples(project_dir: Path):
         return
 
     if action == "list":
-        # List existing examples
         files = list(examples_dir.glob("*"))
 
         if not files:
@@ -421,7 +251,6 @@ def manage_examples(project_dir: Path):
         console.print(table)
 
     elif action == "add":
-        # Add a new example
         file_path = prompt(
             "Enter path to the file to add as example: ", completer=PathCompleter()
         )
@@ -431,7 +260,6 @@ def manage_examples(project_dir: Path):
             show_error_message(f"File {file_path} does not exist.")
             return
 
-        # Determine if it's an old or new example
         example_type = console_radiolist(
             title="Example Type",
             text="Is this an old (before) or new (after) example?",
@@ -444,10 +272,8 @@ def manage_examples(project_dir: Path):
         if not example_type:
             return
 
-        # Get base name
         base_name = prompt("Enter base name for the example: ", default=file_path.stem)
 
-        # Copy file to examples directory
         target_path = examples_dir / f"{base_name}.{example_type}{file_path.suffix}"
         with open(file_path, "r") as src, open(target_path, "w") as dst:
             dst.write(src.read())
@@ -455,7 +281,6 @@ def manage_examples(project_dir: Path):
         show_success_message(f"Example added as {target_path.name}")
 
     elif action == "from-pr":
-        # Generate examples from PR
         pr_number = prompt("Enter PR link: ")
         file_extension = prompt(
             "Enter file extension for examples (default: java): ", default="java"
@@ -469,7 +294,7 @@ def manage_examples(project_dir: Path):
                 print(
                     "Warning: No example patterns were extracted. Creating a simple example..."
                 )
-                # Create a simple example if none were extracted
+
                 examples = [
                     (
                         "// Old version\npublic class Example {\n    // TODO: Add your code here\n}",
@@ -495,7 +320,6 @@ def manage_examples(project_dir: Path):
             console.print("You may need to create examples manually.")
 
     elif action == "setup":
-        # Setup examples from git history
         ref = prompt("Enter git ref: ")
         pattern = prompt("Enter file pattern (optional): ", default="")
 
@@ -511,6 +335,70 @@ def manage_examples(project_dir: Path):
             show_error_message("Error setting up examples", error)
         else:
             show_success_message(f"Examples set up from git ref {ref}")
+
+
+def manage_evals(project_dir: Path):
+    """Manage evaluation test cases."""
+    evals_dir = project_dir / "evals"
+    if not evals_dir.exists():
+        evals_dir.mkdir(exist_ok=True)
+        show_success_message(f"Created evals directory at {evals_dir}")
+
+    action = console_radiolist(
+        title="Evaluations Management",
+        text="What would you like to do?",
+        values=[
+            ("list", "List existing evaluations"),
+            ("from-pr", "Generate evaluations from a PR"),
+            ("from-migration", "Generate evaluation from a recent migration"),
+        ],
+    )
+
+    if not action:
+        return
+
+    if action == "list":
+        eval_dirs = [d for d in evals_dir.iterdir() if d.is_dir()]
+
+        if not eval_dirs:
+            console.print("No evaluations found.")
+            return
+
+        table = Table(title="Evaluations")
+        table.add_column("Name", style="cyan")
+        table.add_column("Files", style="green")
+        table.add_column("Created", style="blue")
+
+        for eval_dir in eval_dirs:
+            source_dir = eval_dir / "source"
+            files = list(source_dir.glob("*")) if source_dir.exists() else []
+            created = datetime.fromtimestamp(eval_dir.stat().st_ctime).strftime(
+                "%Y-%m-%d %H:%M"
+            )
+            table.add_row(eval_dir.name, str(len(files)), created)
+
+        console.print(table)
+
+    elif action == "from-pr":
+        pr_number = prompt("Enter PR link: ")
+
+        result, error = run_async_with_progress(
+            "Generating evaluations from PR...",
+            generate_eval_from_pr,
+            pr_number,
+            str(project_dir),
+        )
+
+        if error:
+            show_error_message("Error generating evaluations", error)
+            return error
+        else:
+            show_success_message(
+                f"Generated evaluations from PR #{pr_number} at {result}"
+            )
+
+    elif action == "from-migration":
+        console.print("This feature is not yet implemented.")
 
 
 def manage_system_prompt(project_dir: Path):
@@ -535,14 +423,12 @@ def manage_system_prompt(project_dir: Path):
         return
 
     if action == "view":
-        # View the system prompt
         content = system_prompt_path.read_text()
         console.print(
             Panel(Markdown(content), title="System Prompt", border_style="blue")
         )
 
     elif action == "edit":
-        # Edit the system prompt
         content = system_prompt_path.read_text()
 
         with tempfile.NamedTemporaryFile(suffix=".md", mode="w", delete=False) as tmp:
@@ -564,7 +450,6 @@ def manage_system_prompt(project_dir: Path):
             console.print("System prompt not changed.")
 
     elif action == "generate":
-        # Generate a new system prompt
         method = console_radiolist(
             title="Generation Method",
             text="How would you like to generate the system prompt?",
@@ -627,7 +512,6 @@ The system prompt should be concise but comprehensive, focusing on the migration
                 show_error_message("Error generating system prompt", error)
                 return
 
-        # Preview the generated prompt
         console.print(
             Panel(
                 Markdown(system_prompt),
@@ -680,21 +564,25 @@ def init(interactive):
         ):
             return
 
-    # Ask about PR-based initialization
     use_pr = console_yes_no(
         title="PR-Based Initialization",
         text="Do you want to initialize the project based on a GitHub PR?",
     )
 
+    generate_evals = False
+
     if use_pr:
-        # Get PR details
         pr_number = prompt("Enter PR link: ")
         description = prompt("Enter a brief description of the migration task: ")
         file_extension = prompt(
             "Enter file extension for examples (default: java): ", default="java"
         )
 
-        # Initialize from PR
+        generate_evals = console_yes_no(
+            title="Generate Evaluations",
+            text="Do you want to generate evaluation files from this PR?",
+        )
+
         result, error = run_async_with_progress(
             "Initializing project from PR...",
             setup_project_from_pr,
@@ -712,11 +600,10 @@ def init(interactive):
         else:
             show_success_message(f"Project initialized successfully at {project_path}")
 
-            # Generate evals if requested
             if generate_evals and pr_number:
                 result, error = run_async_with_progress(
                     "Generating evaluation files from PR...",
-                    generate_evals_from_pr,
+                    generate_eval_from_pr,
                     pr_number,
                     str(project_path),
                 )
@@ -729,7 +616,6 @@ def init(interactive):
                 else:
                     show_success_message("Evaluation files generated successfully")
     else:
-        # Traditional initialization
         project_path.mkdir(parents=True, exist_ok=True)
         examples_dir = project_path / "examples"
         examples_dir.mkdir(exist_ok=True)
@@ -741,7 +627,6 @@ def init(interactive):
 
         show_success_message(f"Project initialized successfully at {project_path}")
 
-    # Show next steps
     console.print("\nNext steps:")
     console.print("1. Review the generated system prompt")
     console.print("2. Review the generated examples")
@@ -798,8 +683,8 @@ def project_dir_option(f):
 @project_dir_option
 @click.option(
     "--manage",
-    type=click.Choice(["examples", "system-prompt"]),
-    help="Manage examples or system prompt",
+    type=click.Choice(["examples", "system-prompt", "evals"]),
+    help="Manage examples, system prompt, or evaluations",
 )
 @click.option("--manifest-file", help="Path to the manifest file")
 @click.option(
@@ -821,6 +706,11 @@ def project_dir_option(f):
     type=str,
     help="Use fake LLM responses for testing",
 )
+@click.option(
+    "--dont-create-evals",
+    is_flag=True,
+    help="Don't automatically create evaluations after successful migrations",
+)
 def migrate(
     file_paths,
     project_dir,
@@ -830,10 +720,11 @@ def migrate(
     max_workers,
     local_worktrees,
     llm_fakes,
+    dont_create_evals,
 ):
     """Migrate one or more files or manage project resources.
 
-    If --manage is specified, you can manage examples or system prompt instead of migrating files.
+    If --manage is specified, you can manage examples, system prompt, or evaluations instead of migrating files.
     """
     console.print(f"Using project: [bold cyan]{project_dir}[/bold cyan]")
 
@@ -844,10 +735,12 @@ def migrate(
         elif manage == "system-prompt":
             manage_system_prompt(project_dir)
             return
+        elif manage == "evals":
+            manage_evals(project_dir)
+            return
 
     from .projects import run as projects_run
 
-    # If no files are specified and no manifest file, prompt for a file
     if not file_paths and not manifest_file:
         if (make_manifest_script := (Path(project_dir) / "make_manifest.py")).exists():
             console.print("Found make_manifest.py in project directory. Running...")
@@ -887,7 +780,9 @@ def migrate(
             not rerun_passed,
             max_workers,
             local_worktrees,
+            resume=True,
             llm_fakes=llm_fakes,
+            dont_create_evals=dont_create_evals,
         )
     )
 
@@ -913,13 +808,9 @@ def status(
 ):
     """Show the status of migration projects."""
 
-    # Import the status function from projects module
     from .projects import status as projects_status
 
-    # Run status with progress
-    result, error = run_with_progress(
-        "Getting migration status...", projects_status, manifest
-    )
+    result, error = run_with_progress("Getting migration status...", projects_status)
 
     if error:
         show_error_message("Failed to get migration status", error)
@@ -931,10 +822,8 @@ def status(
 def checkout(file_path, project_dir):
     """Check out the branch for a file to try manual fixes on a failed migration attempt."""
 
-    # Import the checkout_failed function from projects module
     from .projects import checkout_failed
 
-    # Run checkout with progress
     result, error = run_with_progress(
         f"Checking out branch for {file_path}...", checkout_failed, file_path
     )
@@ -946,36 +835,11 @@ def checkout(file_path, project_dir):
 
 
 @cli.command()
-@project_dir_option
-@click.option("--pr", help="PR number to generate evals from")
-def generate_evals(project_dir, pr):
-    """Generate evaluation files from a PR."""
-    if not pr:
-        pr = prompt("Enter PR link: ")
-
-    # Generate evals
-    result, error = run_async_with_progress(
-        "Generating evaluation files from PR...",
-        generate_evals_from_pr,
-        pr,
-        str(project_dir),
-    )
-
-    if error:
-        show_error_message(f"Error generating evaluation files: {error}")
-    else:
-        show_success_message(
-            f"Evaluation files generated successfully at {project_dir}/evals"
-        )
-
-
-@cli.command()
 @click.argument("manifest")
 def merge_branches(manifest):
     """Merge the changes from the migrator branches."""
     from .merge_migrator_changes import merge
 
-    # Run merge with progress
     result, error = run_with_progress(
         "Merging changes from migrator branches...", merge, manifest
     )
@@ -1084,7 +948,6 @@ def main():
         console.print("\n[yellow]Operation cancelled by user.[/yellow]")
         sys.exit(1)
     except Exception as e:
-        # Escape any square brackets in the error message to prevent Rich markup interpretation
         error_msg = str(e).replace("[", "\\[").replace("]", "\\]")
         console.print(f"\n[red]Error:[/red] {error_msg}")
         console.print_exception()
