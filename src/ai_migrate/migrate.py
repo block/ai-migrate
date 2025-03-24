@@ -13,8 +13,9 @@ from typing import Any, Iterable, Optional
 from ai_migrate.llm_providers import DefaultClient
 from .fake_llm_client import FakeLLMClient
 from .git_identity import environment_variables
-from .manifest import FileGroup
+from .manifest import FileGroup, FileEntry, Manifest
 from .resolve_symbols import get_symbol_definition
+from .eval_generator import generate_eval_from_migration
 
 FN_LOOKUP_SYMBOL = "lookup_symbol_definition"
 
@@ -120,18 +121,15 @@ def read_file_pairs_from(examples_dir: str | Path) -> Iterable[MigrationExample]
                 )
         return files
 
-    # Find all .old directories
     old_dirs = [
         d for d in examples_dir.iterdir() if d.is_dir() and d.name.endswith(".old")
     ]
 
     for old_dir in old_dirs:
-        # Construct the corresponding .new directory name
-        base_name = old_dir.name[:-4]  # remove .old
+        base_name = old_dir.name.removesuffix(".old")
         new_dir = old_dir.parent / f"{base_name}.new"
 
         if new_dir.exists() and new_dir.is_dir():
-            # Get all files recursively from both directories
             old_files = get_files_recursively(old_dir)
             new_files = get_files_recursively(new_dir)
 
@@ -139,7 +137,6 @@ def read_file_pairs_from(examples_dir: str | Path) -> Iterable[MigrationExample]
                 name=base_name, old_files=old_files, new_files=new_files
             )
 
-    # Handle individual file pairs in the root directory
     for file in examples_dir.iterdir():
         if file.is_file() and ".old." in file.name:
             base, ext = file.name.split(".old.", 1)
@@ -171,7 +168,6 @@ def un_escape_nbsp(text: str) -> str:
     return text.replace("<LLM-NBSP>", "\u00a0")
 
 
-# TODO: Make this a shared utility with log reducer.
 LANGUAGE_EXTENSIONS = {
     "bash": [".sh", ".bash"],
     "python": [".py", ".pyx", ".pyi"],
@@ -378,7 +374,20 @@ async def run(
     llm_fakes,
     target_dir: str = "",
     target_basename: str = "",
+    dont_create_evals=False,
 ):
+    """Run the migration process on the target files.
+
+    Args:
+        target_files: List of files to migrate
+        system_prompt: System prompt for the LLM
+        examples_dir: Directory containing example migrations
+        verify_cmd: Command to verify the migrated files
+        pre_verify_cmd: Command to run before migration
+        log_stream: Stream to write logs to
+        local_worktrees: Whether to create worktrees locally
+        dont_create_evals: If True, don't automatically create evaluations after successful migrations
+    """
     if log_stream:
         LOG_STREAM.set(log_stream)
 
@@ -467,6 +476,7 @@ async def run(
         pre_verify_cmd,
         worktree_root,
         llm_fakes,
+        dont_create_evals,
         target_dir=target_dir,
         target_dir_rel_path=target_dir_rel_path,
         target_basename=target_basename,
@@ -527,6 +537,7 @@ async def _run(
     pre_verify_cmd,
     worktree_root,
     llm_fakes,
+    dont_create_evals=False,
     target_dir=None,
     target_dir_rel_path=None,
     target_basename=None,
@@ -706,6 +717,53 @@ async def _run(
 
             if verify_process.returncode == 0:
                 log("Verification successful")
+
+                if not dont_create_evals:
+                    original_contents = {}
+                    for target_file in target_files:
+                        full_path = Path(target_file).absolute()
+                        short_name = full_path.relative_to(worktree_root)
+                        try:
+                            with open(full_path, "r") as f:
+                                original_contents[str(short_name)] = f.read()
+                        except Exception as e:
+                            log(f"Error reading {full_path}: {e}")
+
+                    transformed_contents = {}
+                    for file_path in written_files:
+                        full_path = Path(worktree_root) / file_path
+                        try:
+                            with open(full_path, "r") as f:
+                                transformed_contents[file_path] = f.read()
+                        except Exception as e:
+                            log(f"Error reading transformed file {full_path}: {e}")
+
+                    try:
+                        project_dir = Path(examples_dir).parent
+
+                        eval_manifest = Manifest(
+                            files=[
+                                FileEntry(filename=fname, result="pass")
+                                for fname in written_files
+                            ],
+                            verify_cmd=" ".join(verify_cmd)
+                            if isinstance(verify_cmd, list)
+                            else verify_cmd,
+                        )
+                        if pre_verify_cmd:
+                            eval_manifest.pre_verify_cmd = pre_verify_cmd
+
+                        eval_dir = generate_eval_from_migration(
+                            project_dir,
+                            original_contents,
+                            transformed_contents,
+                            eval_manifest,
+                        )
+                        log(f"Created evaluation at {eval_dir}")
+                    except Exception as e:
+                        log(f"Error creating evaluation: {e}")
+                        log(f"Exception type: {type(e).__name__}")
+
                 break
             log("Verification failed:")
             for line in verification_output.splitlines():

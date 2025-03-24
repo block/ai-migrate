@@ -70,6 +70,7 @@ async def run(
     local_worktrees=False,
     resume: bool = True,
     llm_fakes=None,
+    dont_create_evals: bool = False,
 ) -> list[FileGroup]:
     """Run an AI migration project."""
     if manifest_file:
@@ -129,6 +130,7 @@ async def run(
                 log_stream=log_buffer,
                 local_worktrees=local_worktrees,
                 llm_fakes=llm_fakes,
+                dont_create_evals=dont_create_evals,
                 target_dir=manifest.target_dir,
                 target_basename=files.base_name,
             )
