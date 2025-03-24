@@ -23,7 +23,7 @@ jobs:
       - uses: actions/checkout@v4
       - uses: cashapp/activate-hermit@v1
       - run: |
-          uv run src/ai_migrate/run-eval.py mini
+          uv run src/ai_migrate/run_eval.py mini
   
 
   pytest:
