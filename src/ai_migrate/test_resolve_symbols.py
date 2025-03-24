@@ -36,6 +36,5 @@ def test_contains_definition(line, symbol, expected):
     assert contains_definition(line, symbol) == expected
 
 
-
 if __name__ == "__main__":
     pytest.main()
