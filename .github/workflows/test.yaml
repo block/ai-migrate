@@ -1,0 +1,37 @@
+name: Test
+
+on:
+  push: {}
+
+jobs:
+  check:
+    name: Ruff check
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v4
+      - uses: cashapp/activate-hermit@v1
+      - run: |
+          uv run ruff check .
+          uv run ruff format --check
+
+  e2e-test:
+    name: Run end-to-end test
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v4
+      - uses: cashapp/activate-hermit@v1
+      - run: |
+          uv run src/ai_migrate/run_eval.py mini
+  
+
+  pytest:
+    name: Run pytest
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v4
+      - uses: cashapp/activate-hermit@v1
+      - run: |
+          uv run pytest
