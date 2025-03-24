@@ -710,60 +710,60 @@ async def _run(
             cwd=worktree_root,
         )
 
-            if verify_process.returncode == 0:
-                log("Verification successful")
+        if verify_process.returncode == 0:
+            log("Verification successful")
 
-                if not dont_create_evals:
-                    original_contents = {}
-                    for target_file in target_files:
-                        full_path = Path(target_file).absolute()
-                        short_name = full_path.relative_to(worktree_root)
-                        try:
-                            with open(full_path, "r") as f:
-                                original_contents[str(short_name)] = f.read()
-                        except Exception as e:
-                            log(f"Error reading {full_path}: {e}")
-
-                    transformed_contents = {}
-                    for file_path in written_files:
-                        full_path = Path(worktree_root) / file_path
-                        try:
-                            with open(full_path, "r") as f:
-                                transformed_contents[file_path] = f.read()
-                        except Exception as e:
-                            log(f"Error reading transformed file {full_path}: {e}")
-
+            if not dont_create_evals:
+                original_contents = {}
+                for target_file in target_files:
+                    full_path = Path(target_file).absolute()
+                    short_name = full_path.relative_to(worktree_root)
                     try:
-                        project_dir = Path(examples_dir).parent
-
-                        eval_manifest = Manifest(
-                            files=[
-                                FileEntry(filename=fname, result="pass")
-                                for fname in written_files
-                            ],
-                            verify_cmd=" ".join(verify_cmd)
-                            if isinstance(verify_cmd, list)
-                            else verify_cmd,
-                        )
-                        if pre_verify_cmd:
-                            eval_manifest.pre_verify_cmd = pre_verify_cmd
-
-                        eval_dir = generate_eval_from_migration(
-                            project_dir,
-                            original_contents,
-                            transformed_contents,
-                            eval_manifest,
-                        )
-                        log(f"Created evaluation at {eval_dir}")
+                        with open(full_path, "r") as f:
+                            original_contents[str(short_name)] = f.read()
                     except Exception as e:
-                        log(f"Error creating evaluation: {e}")
-                        log(f"Exception type: {type(e).__name__}")
-                await remove_worktree(worktree_root)
-                break
+                        log(f"Error reading {full_path}: {e}")
 
-            log("Verification failed:")
-            for line in verification_output.splitlines():
-                log(f"[verify] {line}")
+                transformed_contents = {}
+                for file_path in written_files:
+                    full_path = Path(worktree_root) / file_path
+                    try:
+                        with open(full_path, "r") as f:
+                            transformed_contents[file_path] = f.read()
+                    except Exception as e:
+                        log(f"Error reading transformed file {full_path}: {e}")
+
+                try:
+                    project_dir = Path(examples_dir).parent
+
+                    eval_manifest = Manifest(
+                        files=[
+                            FileEntry(filename=fname, result="pass")
+                            for fname in written_files
+                        ],
+                        verify_cmd=" ".join(verify_cmd)
+                        if isinstance(verify_cmd, list)
+                        else verify_cmd,
+                    )
+                    if pre_verify_cmd:
+                        eval_manifest.pre_verify_cmd = pre_verify_cmd
+
+                    eval_dir = generate_eval_from_migration(
+                        project_dir,
+                        original_contents,
+                        transformed_contents,
+                        eval_manifest,
+                    )
+                    log(f"Created evaluation at {eval_dir}")
+                except Exception as e:
+                    log(f"Error creating evaluation: {e}")
+                    log(f"Exception type: {type(e).__name__}")
+            await remove_worktree(worktree_root)
+            break
+
+        log("Verification failed:")
+        for line in verification_output.splitlines():
+            log(f"[verify] {line}")
 
         lookup_symbol_prompt = (
             f"Use the {FN_LOOKUP_SYMBOL} tool to find the definition of any symbols related to this problem. "
