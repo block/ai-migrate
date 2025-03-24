@@ -13,9 +13,8 @@ from typing import Any, Iterable, Optional
 from ai_migrate.llm_providers import DefaultClient
 from .fake_llm_client import FakeLLMClient
 from .git_identity import environment_variables
-from .manifest import FileGroup, FileEntry, Manifest
+from .manifest import FileGroup
 from .resolve_symbols import get_symbol_definition
-from .eval_generator import generate_eval_from_migration
 
 FN_LOOKUP_SYMBOL = "lookup_symbol_definition"
 
@@ -126,7 +125,8 @@ def read_file_pairs_from(examples_dir: str | Path) -> Iterable[MigrationExample]
     ]
 
     for old_dir in old_dirs:
-        base_name = old_dir.name.removesuffix(".old")
+        # Construct the corresponding .new directory name
+        base_name = old_dir.name[:-4]  # remove .old
         new_dir = old_dir.parent / f"{base_name}.new"
 
         if new_dir.exists() and new_dir.is_dir():
@@ -374,20 +374,7 @@ async def run(
     llm_fakes,
     target_dir: str = "",
     target_basename: str = "",
-    dont_create_evals=False,
 ):
-    """Run the migration process on the target files.
-
-    Args:
-        target_files: List of files to migrate
-        system_prompt: System prompt for the LLM
-        examples_dir: Directory containing example migrations
-        verify_cmd: Command to verify the migrated files
-        pre_verify_cmd: Command to run before migration
-        log_stream: Stream to write logs to
-        local_worktrees: Whether to create worktrees locally
-        dont_create_evals: If True, don't automatically create evaluations after successful migrations
-    """
     if log_stream:
         LOG_STREAM.set(log_stream)
 
@@ -476,7 +463,6 @@ async def run(
         pre_verify_cmd,
         worktree_root,
         llm_fakes,
-        dont_create_evals,
         target_dir=target_dir,
         target_dir_rel_path=target_dir_rel_path,
         target_basename=target_basename,
@@ -529,6 +515,15 @@ class FailedPreVerification(Exception):
     pass
 
 
+def build_messages(
+    initial_messages: list[dict], iteration_messages: list[list[dict]]
+) -> list[dict]:
+    messages = initial_messages
+    for iteration_message in iteration_messages:
+        messages.extend(iteration_message)
+    return messages
+
+
 async def _run(
     target_files,
     system_prompt,
@@ -537,7 +532,6 @@ async def _run(
     pre_verify_cmd,
     worktree_root,
     llm_fakes,
-    dont_create_evals=False,
     target_dir=None,
     target_dir_rel_path=None,
     target_basename=None,
@@ -581,6 +575,8 @@ async def _run(
     messages, tools = messages_and_tools(examples, target, system_prompt)
     all_files_to_verify = set()
 
+    iteration_messages = []
+
     try:
         if pre_verify_cmd:
             log("Running pre-verification")
@@ -609,14 +605,31 @@ async def _run(
 
         for tries in range(int(os.getenv("AI_MIGRATE_MAX_TRIES", 10))):
             log(f"[agent] Running migration attempt {tries + 1}")
+
+            messages = build_messages(messages, iteration_messages)
+            log(f"[agent] Messages length: {client.count_tokens(messages)}")
+            while (
+                client.max_context_tokens() > 0
+                and client.count_tokens(messages) > client.max_context_tokens()
+            ):
+                log(f"Trimming iteration messages: {len(iteration_messages)}")
+                # Fall back to 3 examples + trim iterations 1 at a time.
+                #   Can eventually tune a more sophisticated strategy for examples vs iterations tradeoff.
+                messages, _ = messages_and_tools(examples[:3], target, system_prompt)
+                iteration_messages = iteration_messages[1:]
+                messages = build_messages(messages, iteration_messages)
+
             response, messages = await call_llm(client, messages, tools)
 
             response_text = response["choices"][0]["message"]["content"]
             parsed_result = extract_code_blocks(response_text)
 
+            iteration_message = []
             if not parsed_result.code_blocks:
-                messages.append({"role": ROLE_ASSISTANT, "content": response_text})
-                messages.append(
+                iteration_message.append(
+                    {"role": ROLE_ASSISTANT, "content": response_text}
+                )
+                iteration_message.append(
                     {
                         "role": ROLE_USER,
                         "content": "Include the full, complete code block. Do not omit any part of the file",
@@ -717,53 +730,6 @@ async def _run(
 
             if verify_process.returncode == 0:
                 log("Verification successful")
-
-                if not dont_create_evals:
-                    original_contents = {}
-                    for target_file in target_files:
-                        full_path = Path(target_file).absolute()
-                        short_name = full_path.relative_to(worktree_root)
-                        try:
-                            with open(full_path, "r") as f:
-                                original_contents[str(short_name)] = f.read()
-                        except Exception as e:
-                            log(f"Error reading {full_path}: {e}")
-
-                    transformed_contents = {}
-                    for file_path in written_files:
-                        full_path = Path(worktree_root) / file_path
-                        try:
-                            with open(full_path, "r") as f:
-                                transformed_contents[file_path] = f.read()
-                        except Exception as e:
-                            log(f"Error reading transformed file {full_path}: {e}")
-
-                    try:
-                        project_dir = Path(examples_dir).parent
-
-                        eval_manifest = Manifest(
-                            files=[
-                                FileEntry(filename=fname, result="pass")
-                                for fname in written_files
-                            ],
-                            verify_cmd=" ".join(verify_cmd)
-                            if isinstance(verify_cmd, list)
-                            else verify_cmd,
-                        )
-                        if pre_verify_cmd:
-                            eval_manifest.pre_verify_cmd = pre_verify_cmd
-
-                        eval_dir = generate_eval_from_migration(
-                            project_dir,
-                            original_contents,
-                            transformed_contents,
-                            eval_manifest,
-                        )
-                        log(f"Created evaluation at {eval_dir}")
-                    except Exception as e:
-                        log(f"Error creating evaluation: {e}")
-                        log(f"Exception type: {type(e).__name__}")
-
                 break
             log("Verification failed:")
             for line in verification_output.splitlines():
@@ -781,17 +747,18 @@ async def _run(
             ):
                 lookup_symbol_prompt = ""
 
-            messages.append({"role": ROLE_ASSISTANT, "content": response_text})
-            messages.append(
+            iteration_message.append({"role": ROLE_ASSISTANT, "content": response_text})
+            iteration_message.append(
                 {
                     "role": ROLE_USER,
                     "content": f"The code did not compile. The error was: {verification_output}. "
                     f"{lookup_symbol_prompt}",
                 }
             )
+            iteration_messages.append(iteration_message)
 
         else:
-            raise ValueError("Migration failed")
+            raise ValueError("Migration failed: Out of tries")
     finally:
         with open("messages.json", "w") as f:
             json.dump(messages, f, indent=2)
