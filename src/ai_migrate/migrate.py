@@ -1,9 +1,9 @@
 import asyncio
 import contextvars
 import os
+import shutil
 import sys
 import tempfile
-import time
 from dataclasses import dataclass
 from pathlib import Path
 import subprocess
@@ -519,6 +519,10 @@ class FailedPreVerification(Exception):
     pass
 
 
+async def remove_worktree(worktree_root: str | Path):
+    await asyncio.to_thread(shutil.rmtree, worktree_root, ignore_errors=True)
+
+
 async def _run(
     target_files,
     system_prompt,
@@ -570,170 +574,159 @@ async def _run(
     messages, tools = messages_and_tools(examples, target, system_prompt)
     all_files_to_verify = set()
 
-    try:
-        if pre_verify_cmd:
-            log("Running pre-verification")
-            try:
-                await subprocess_run(
-                    [*pre_verify_cmd.split(), *target_files],
-                    prefix="pre-verify",
-                    check=True,
-                    cwd=worktree_root,
-                )
-            except subprocess.CalledProcessError:
-                log(
-                    "Pre-verification failed. The migration cannot continue until all files pass the pre-verify step"
-                )
-                raise FailedPreVerification(
-                    f"file {target_files} failed pre-verification"
-                )
-
-        if not target_dir:
-            for target_file in target_files:
-                os.remove(target_file)
-                await subprocess_run(
-                    ["git", "add", target_file],
-                    cwd=worktree_root,
-                )
-
-        for tries in range(int(os.getenv("AI_MIGRATE_MAX_TRIES", 10))):
-            log(f"[agent] Running migration attempt {tries + 1}")
-            response, messages = await call_llm(client, messages, tools)
-
-            response_text = response["choices"][0]["message"]["content"]
-            parsed_result = extract_code_blocks(response_text)
-
-            if not parsed_result.code_blocks:
-                messages.append({"role": ROLE_ASSISTANT, "content": response_text})
-                messages.append(
-                    {
-                        "role": ROLE_USER,
-                        "content": "Include the full, complete code block. Do not omit any part of the file",
-                    }
-                )
-                continue
-
-            with open(f"response-{time.time()}.md", "w") as f:
-                f.write(response_text)
-
-            written_files = set()
-            for code_block in parsed_result.code_blocks:
-                migrated_code = un_escape_nbsp(code_block.code)
-
-                if code_block.filename:
-                    written_files.add(code_block.filename)
-                    if target_dir:
-                        output_path = (
-                            Path(worktree_root)
-                            / target_dir_rel_path
-                            / target_basename
-                            / code_block.filename
-                        )
-                    else:
-                        output_path = Path(worktree_root) / code_block.filename
-                    output_path.parent.mkdir(parents=True, exist_ok=True)
-
-                    with open(output_path, "w") as f:
-                        f.write(migrated_code)
-
-            all_files_to_verify |= written_files
-
-            # Add the files to verify with the correct paths
-            if target_dir:
-                full_verify_cmd = [
-                    *verify_cmd,
-                    str(Path(target_dir_rel_path) / target_basename),
-                ]
-            else:
-                full_verify_cmd = [
-                    *verify_cmd,
-                    *[str(Path(worktree_root) / f) for f in all_files_to_verify],
-                ]
-
-            log(f"Running verification: {full_verify_cmd}")
-            verify_process = await asyncio.create_subprocess_exec(
-                *full_verify_cmd,
-                cwd=worktree_root,
-                stdout=subprocess.PIPE,
-                stderr=subprocess.PIPE,
-            )
-            stdout, stderr = await verify_process.communicate()
-
-            status = "pass" if verify_process.returncode == 0 else "fail"
-
-            commit_message = f"Migration attempt {tries + 1} {status=}:\n\nLLM response:\n{parsed_result.other_text}"
-
-            for file in written_files:
-                if target_dir:
-                    file_path = (
-                        Path(worktree_root)
-                        / target_dir_rel_path
-                        / target_basename
-                        / file
-                    )
-                    git_path = Path(file_path).relative_to(worktree_root)
-                    await subprocess_run(
-                        ["git", "add", git_path],
-                        cwd=worktree_root,
-                    )
-                else:
-                    await subprocess_run(
-                        ["git", "add", file],
-                        cwd=worktree_root,
-                    )
-
+    if pre_verify_cmd:
+        log("Running pre-verification")
+        try:
             await subprocess_run(
-                ["git", "commit", "--allow-empty", "-m", commit_message],
-                check=True,
-                cwd=worktree_root,
-                env={**os.environ, **environment_variables()},
-            )
-
-            verification_output = (stderr or stdout or b"").decode()
-            await subprocess_run(
-                [
-                    "git",
-                    "notes",
-                    "--ref=migrator-verify",
-                    "add",
-                    "-f",
-                    "-m",
-                    verification_output,
-                ],
+                [*pre_verify_cmd.split(), *target_files],
+                prefix="pre-verify",
                 check=True,
                 cwd=worktree_root,
             )
-
-            if verify_process.returncode == 0:
-                log("Verification successful")
-                break
-            log("Verification failed:")
-            for line in verification_output.splitlines():
-                log(f"[verify] {line}")
-
-            lookup_symbol_prompt = (
-                f"Use the {FN_LOOKUP_SYMBOL} tool to find the definition of any symbols related to this problem. "
-                "Then apply the necessary changes to the code. Don't guess or assume functionality."
-                "From now on, only re-write files, don't rename them."
+        except subprocess.CalledProcessError:
+            log(
+                "Pre-verification failed. The migration cannot continue until all files pass the pre-verify step"
             )
-            if os.environ.get("AI_MIGRATE_DISABLE_TOOLS", "").lower() in (
-                "true",
-                "1",
-                "yes",
-            ):
-                lookup_symbol_prompt = ""
+            raise FailedPreVerification(f"file {target_files} failed pre-verification")
 
+    if not target_dir:
+        for target_file in target_files:
+            os.remove(target_file)
+            await subprocess_run(
+                ["git", "add", target_file],
+                cwd=worktree_root,
+            )
+
+    for tries in range(int(os.getenv("AI_MIGRATE_MAX_TRIES", 10))):
+        log(f"[agent] Running migration attempt {tries + 1}")
+        response, messages = await call_llm(client, messages, tools)
+
+        response_text = response["choices"][0]["message"]["content"]
+        parsed_result = extract_code_blocks(response_text)
+
+        if not parsed_result.code_blocks:
             messages.append({"role": ROLE_ASSISTANT, "content": response_text})
             messages.append(
                 {
                     "role": ROLE_USER,
-                    "content": f"The code did not compile. The error was: {verification_output}. "
-                    f"{lookup_symbol_prompt}",
+                    "content": "Include the full, complete code block. Do not omit any part of the file",
                 }
             )
+            continue
 
+        written_files = set()
+        for code_block in parsed_result.code_blocks:
+            migrated_code = un_escape_nbsp(code_block.code)
+
+            if code_block.filename:
+                written_files.add(code_block.filename)
+                if target_dir:
+                    output_path = (
+                        Path(worktree_root)
+                        / target_dir_rel_path
+                        / target_basename
+                        / code_block.filename
+                    )
+                else:
+                    output_path = Path(worktree_root) / code_block.filename
+                output_path.parent.mkdir(parents=True, exist_ok=True)
+
+                with open(output_path, "w") as f:
+                    f.write(migrated_code)
+
+        all_files_to_verify |= written_files
+
+        # Add the files to verify with the correct paths
+        if target_dir:
+            full_verify_cmd = [
+                *verify_cmd,
+                str(Path(target_dir_rel_path) / target_basename),
+            ]
         else:
-            raise ValueError("Migration failed")
-    finally:
-        with open("messages.json", "w") as f:
-            json.dump(messages, f, indent=2)
+            full_verify_cmd = [
+                *verify_cmd,
+                *[str(Path(worktree_root) / f) for f in all_files_to_verify],
+            ]
+
+        log(f"Running verification: {full_verify_cmd}")
+        verify_process = await asyncio.create_subprocess_exec(
+            *full_verify_cmd,
+            cwd=worktree_root,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+        )
+        stdout, stderr = await verify_process.communicate()
+
+        status = "pass" if verify_process.returncode == 0 else "fail"
+
+        commit_message = f"Migration attempt {tries + 1} {status=}:\n\nLLM response:\n{parsed_result.other_text}"
+
+        for file in written_files:
+            if target_dir:
+                file_path = (
+                    Path(worktree_root) / target_dir_rel_path / target_basename / file
+                )
+                git_path = Path(file_path).relative_to(worktree_root)
+                await subprocess_run(
+                    ["git", "add", git_path],
+                    cwd=worktree_root,
+                )
+            else:
+                await subprocess_run(
+                    ["git", "add", file],
+                    cwd=worktree_root,
+                )
+
+        await subprocess_run(
+            ["git", "commit", "--allow-empty", "-m", commit_message],
+            check=True,
+            cwd=worktree_root,
+            env={**os.environ, **environment_variables()},
+        )
+
+        verification_output = (stderr or stdout or b"").decode()
+        await subprocess_run(
+            [
+                "git",
+                "notes",
+                "--ref=migrator-verify",
+                "add",
+                "-f",
+                "-m",
+                verification_output,
+            ],
+            check=True,
+            cwd=worktree_root,
+        )
+
+        if verify_process.returncode == 0:
+            log("Verification successful")
+            await remove_worktree(worktree_root)
+            break
+        log("Verification failed:")
+        for line in verification_output.splitlines():
+            log(f"[verify] {line}")
+
+        lookup_symbol_prompt = (
+            f"Use the {FN_LOOKUP_SYMBOL} tool to find the definition of any symbols related to this problem. "
+            "Then apply the necessary changes to the code. Don't guess or assume functionality."
+            "From now on, only re-write files, don't rename them."
+        )
+        if os.environ.get("AI_MIGRATE_DISABLE_TOOLS", "").lower() in (
+            "true",
+            "1",
+            "yes",
+        ):
+            lookup_symbol_prompt = ""
+
+        messages.append({"role": ROLE_ASSISTANT, "content": response_text})
+        messages.append(
+            {
+                "role": ROLE_USER,
+                "content": f"The code did not compile. The error was: {verification_output}. "
+                f"{lookup_symbol_prompt}",
+            }
+        )
+
+    else:
+        raise ValueError("Migration failed")

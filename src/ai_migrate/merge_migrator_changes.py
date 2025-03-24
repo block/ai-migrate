@@ -1,10 +1,15 @@
 import subprocess
+from pathlib import Path
 
 from ai_migrate.git import get_branches
+from ai_migrate.manifest import Manifest
 
 
-def merge():
-    matching_branches = [(branch, status) for _, branch, status, _ in get_branches()]
+def merge(manifest_file: str):
+    manifest = Manifest.model_validate_json(Path(manifest_file).read_text())
+    matching_branches = [
+        (branch, status) for _, branch, status, _ in get_branches(manifest)
+    ]
     mergeable = [b for b, status in matching_branches if status == "pass"]
     print("Merging:")
     print("\n".join(mergeable))
