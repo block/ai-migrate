@@ -1,19 +1,28 @@
 import os
 import shutil
 from pathlib import Path
-from typing import List, Union, BinaryIO, Dict, Any
+from typing import List, Union, BinaryIO
 
 from . import StorageBackend, StorageError
+from .config import StorageConfig, StorageType
 
 class LocalStorageBackend(StorageBackend):
     """Storage backend implementation using the local filesystem."""
     
-    def __init__(self, base_path: Union[str, Path] = None):
+    def __init__(self, config: StorageConfig):
         """Initialize the local storage backend.
         
-        @param base_path Base directory for storing files (default: current directory)
+        @param config Storage configuration
+        @throws StorageError If the configuration is invalid or incompatible
         """
-        self.base_path = Path(base_path) if base_path else Path.cwd()
+        if config.type != StorageType.LOCAL:
+            raise StorageError(f"Invalid storage type {config.type} for LocalStorageBackend")
+
+        self.base_path = Path(config.path or Path.cwd())
+        try:
+            self.base_path.mkdir(parents=True, exist_ok=True)
+        except OSError as e:
+            raise StorageError(f"Invalid base_path configuration: {e}") from e
         
     def save_file(self, source_path: Union[str, Path], destination_path: Union[str, Path]) -> str:
         """Save a file to the local filesystem.
@@ -107,18 +116,3 @@ class LocalStorageBackend(StorageBackend):
             return True
         except OSError as e:
             raise StorageError(f"Failed to delete file: {e}") from e
-    
-    def configure(self, config: Dict[str, Any]) -> None:
-        """Configure the local storage backend.
-        
-        @param config Dictionary with configuration options:
-               - base_path: Base directory for storing files
-        @throws StorageError If the configuration is invalid
-        """
-        if 'base_path' in config:
-            base_path = Path(config['base_path'])
-            try:
-                base_path.mkdir(parents=True, exist_ok=True)
-                self.base_path = base_path
-            except OSError as e:
-                raise StorageError(f"Invalid base_path configuration: {e}") from e

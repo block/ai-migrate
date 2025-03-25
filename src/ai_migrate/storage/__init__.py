@@ -1,14 +1,20 @@
 from abc import ABC, abstractmethod
 from pathlib import Path
-from typing import List, Union, BinaryIO, Dict, Any
+from typing import List, Union, BinaryIO
+
+from .config import StorageConfig
 
 class StorageBackend(ABC):
-    """Abstract base class defining the interface for storage backends.
+    """Abstract base class defining the interface for storage backends."""
     
-    Storage backends are responsible for storing and retrieving migration results,
-    including files, metadata, and logs. Each backend implementation must provide
-    the core functionality defined in this interface.
-    """
+    @abstractmethod
+    def __init__(self, config: StorageConfig):
+        """Initialize the storage backend with configuration.
+        
+        @param config Storage configuration
+        @throws StorageError If the configuration is invalid or incompatible
+        """
+        pass
     
     @abstractmethod
     def save_file(self, source_path: Union[str, Path], destination_path: Union[str, Path]) -> str:
@@ -60,15 +66,6 @@ class StorageBackend(ABC):
         @param path Path/identifier of the file to delete
         @return True if the file was deleted, False otherwise
         @throws StorageError If the file cannot be deleted
-        """
-        pass
-    
-    @abstractmethod
-    def configure(self, config: Dict[str, Any]) -> None:
-        """Configure the storage backend with backend-specific options.
-        
-        @param config Dictionary of configuration options
-        @throws StorageError If the configuration is invalid
         """
         pass
 
