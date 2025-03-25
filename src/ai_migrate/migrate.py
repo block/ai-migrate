@@ -126,7 +126,7 @@ def read_file_pairs_from(examples_dir: str | Path) -> Iterable[MigrationExample]
     ]
 
     for old_dir in old_dirs:
-        base_name = old_dir.name[:-4]
+        base_name = old_dir.name.removesuffix(".old")
         new_dir = old_dir.parent / f"{base_name}.new"
 
         if new_dir.exists() and new_dir.is_dir():
