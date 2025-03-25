@@ -15,6 +15,7 @@ from .fake_llm_client import FakeLLMClient
 from .git_identity import environment_variables
 from .manifest import FileGroup, FileEntry, Manifest
 from .resolve_symbols import get_symbol_definition
+from .eval_generator import generate_eval_from_migration
 
 FN_LOOKUP_SYMBOL = "lookup_symbol_definition"
 

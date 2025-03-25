@@ -12,7 +12,7 @@ class FakeLLMClient:
     ):
         response_body = next(self.responses)
         return {"choices": [{"message": {"content": response_body}}]}, messages
-    
+
     def count_tokens(self, text: Union[str, List[Dict[str, Any]]]) -> int:
         if isinstance(text, str):
             return len(text)

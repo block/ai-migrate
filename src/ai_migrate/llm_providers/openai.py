@@ -2,9 +2,9 @@ import tiktoken
 from typing import Any, Dict, List, Optional, Tuple, Union
 
 from openai import AsyncOpenAI
-from .base import BaseLLMClient
 
 GPT_VERSION = "gpt-4o"
+
 
 class OpenAIClient:
     """A client for interacting with a large language model."""
