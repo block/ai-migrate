@@ -1,6 +1,9 @@
-from typing import Any, Dict, List, Optional, Tuple
+import tiktoken
+from typing import Any, Dict, List, Optional, Tuple, Union
 
 from openai import AsyncOpenAI
+
+GPT_VERSION = "gpt-4o"
 
 
 class OpenAIClient:
@@ -61,3 +64,16 @@ class OpenAIClient:
 
         response, _ = await self.generate_completion(messages, temperature=temperature)
         return response["choices"][0]["message"]["content"]
+
+    def count_tokens(self, text: Union[str, List[Dict[str, Any]]]) -> int:
+        """Count the number of tokens in a string."""
+        if isinstance(text, str):
+            return len(tiktoken.encoding_for_model(GPT_VERSION).encode(text))
+        elif isinstance(text, list):
+            return sum(self.count_tokens(item["content"]) for item in text)
+        else:
+            raise ValueError(f"Unsupported text type: {type(text)}")
+
+    def max_context_tokens(self) -> int:
+        """Get the maximum context size for the model. -1 means no limit."""
+        return -1

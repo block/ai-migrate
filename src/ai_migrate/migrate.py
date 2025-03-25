@@ -374,10 +374,9 @@ async def run(
     llm_fakes,
     target_dir: str = "",
     target_basename: str = "",
-    dont_create_evals=False,
+    dont_create_evals: bool = False,
 ):
     """Run the migration process on the target files.
-
     Args:
         target_files: List of files to migrate
         system_prompt: System prompt for the LLM
@@ -529,6 +528,15 @@ class FailedPreVerification(Exception):
     pass
 
 
+def build_messages(
+    initial_messages: list[dict], iteration_messages: list[list[dict]]
+) -> list[dict]:
+    messages = initial_messages
+    for iteration_message in iteration_messages:
+        messages.extend(iteration_message)
+    return messages
+
+
 async def _run(
     target_files,
     system_prompt,
@@ -581,6 +589,8 @@ async def _run(
     messages, tools = messages_and_tools(examples, target, system_prompt)
     all_files_to_verify = set()
 
+    iteration_messages = []
+
     try:
         if pre_verify_cmd:
             log("Running pre-verification")
@@ -609,14 +619,30 @@ async def _run(
 
         for tries in range(int(os.getenv("AI_MIGRATE_MAX_TRIES", 10))):
             log(f"[agent] Running migration attempt {tries + 1}")
+
+            messages = build_messages(messages, iteration_messages)
+            log(f"[agent] Messages length: {client.count_tokens(messages)}")
+            while (
+                client.max_context_tokens() > 0
+                and client.count_tokens(messages) > client.max_context_tokens()
+            ):
+                log(f"Trimming iteration messages: {len(iteration_messages)}")
+                # Fall back to 3 examples + trim iterations 1 at a time.
+                messages, _ = messages_and_tools(examples[:3], target, system_prompt)
+                iteration_messages = iteration_messages[1:]
+                messages = build_messages(messages, iteration_messages)
+
             response, messages = await call_llm(client, messages, tools)
 
             response_text = response["choices"][0]["message"]["content"]
             parsed_result = extract_code_blocks(response_text)
 
+            iteration_message = []
             if not parsed_result.code_blocks:
-                messages.append({"role": ROLE_ASSISTANT, "content": response_text})
-                messages.append(
+                iteration_message.append(
+                    {"role": ROLE_ASSISTANT, "content": response_text}
+                )
+                iteration_message.append(
                     {
                         "role": ROLE_USER,
                         "content": "Include the full, complete code block. Do not omit any part of the file",
@@ -781,17 +807,18 @@ async def _run(
             ):
                 lookup_symbol_prompt = ""
 
-            messages.append({"role": ROLE_ASSISTANT, "content": response_text})
-            messages.append(
+            iteration_message.append({"role": ROLE_ASSISTANT, "content": response_text})
+            iteration_message.append(
                 {
                     "role": ROLE_USER,
                     "content": f"The code did not compile. The error was: {verification_output}. "
                     f"{lookup_symbol_prompt}",
                 }
             )
+            iteration_messages.append(iteration_message)
 
         else:
-            raise ValueError("Migration failed")
+            raise ValueError("Migration failed: Out of tries")
     finally:
         with open("messages.json", "w") as f:
             json.dump(messages, f, indent=2)
