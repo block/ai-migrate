@@ -73,10 +73,52 @@ def test_invalid_storage_type():
     with pytest.raises(StorageError, match="Invalid storage type"):
         LocalStorageBackend(config)
 
+def test_storage_with_prefix(temp_storage_dir):
+    config = StorageConfig(
+        type=StorageType.LOCAL,
+        path=temp_storage_dir,
+        prefix="storage"
+    )
+    backend = LocalStorageBackend(config)
+    
+    # Verify prefix directory is created
+    prefix_dir = temp_storage_dir / "storage"
+    assert prefix_dir.exists()
+    assert prefix_dir.is_dir()
+    
+    # Save and list files
+    backend.save_content("test1", "a/test1.txt")
+    backend.save_content("test2", "b/test2.txt")
+    
+    # Files should be in prefix directory
+    assert (prefix_dir / "a/test1.txt").exists()
+    assert (prefix_dir / "b/test2.txt").exists()
+    
+    # List should return paths relative to prefix
+    files = backend.list_files()
+    assert sorted(files) == ["a/test1.txt", "b/test2.txt"]
+    
+    # Get file should work with relative paths
+    with backend.get_file("a/test1.txt") as f:
+        assert f.read() == b"test1"
+
 def test_invalid_base_path(tmp_path):
     invalid_path = tmp_path / "file.txt"
     invalid_path.write_text("test")
     
     config = StorageConfig(type=StorageType.LOCAL, path=str(invalid_path))
     with pytest.raises(StorageError, match="Invalid base_path"):
+        LocalStorageBackend(config)
+
+def test_invalid_prefix(temp_storage_dir):
+    # Create a file where prefix should be a directory
+    prefix_path = temp_storage_dir / "prefix"
+    prefix_path.write_text("test")
+    
+    config = StorageConfig(
+        type=StorageType.LOCAL,
+        path=temp_storage_dir,
+        prefix="prefix"
+    )
+    with pytest.raises(StorageError, match="Invalid prefix"):
         LocalStorageBackend(config)
