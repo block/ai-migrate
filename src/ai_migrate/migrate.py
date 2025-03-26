@@ -620,6 +620,7 @@ async def _run(
 
     for tries in range(int(os.getenv("AI_MIGRATE_MAX_TRIES", 10))):
         log(f"[agent] Running migration attempt {tries + 1}")
+
         messages = build_messages(messages, iteration_messages)
         log(f"[agent] Messages length: {client.count_tokens(messages)}")
         while 0 < client.max_context_tokens() < client.count_tokens(messages):
@@ -634,10 +635,9 @@ async def _run(
         response_text = response["choices"][0]["message"]["content"]
         parsed_result = extract_code_blocks(response_text)
 
-        iteration_message = []if not parsed_result.code_blocks:
-            iteration_message.append(
-                    {"role": ROLE_ASSISTANT, "content": response_text}
-            )
+        iteration_message = []
+        if not parsed_result.code_blocks:
+            iteration_message.append({"role": ROLE_ASSISTANT, "content": response_text})
             iteration_message.append(
                 {
                     "role": ROLE_USER,
@@ -779,9 +779,9 @@ async def _run(
                 except Exception as e:
                     log(f"Error creating evaluation: {e}")
                     log(f"Exception type: {type(e).__name__}")
+
             await remove_worktree(worktree_root)
             break
-
         log("Verification failed:")
         for line in verification_output.splitlines():
             log(f"[verify] {line}")
