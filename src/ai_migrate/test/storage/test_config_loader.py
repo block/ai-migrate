@@ -1,12 +1,9 @@
-import os
 import yaml
 import pytest
-from pathlib import Path
-from typing import Dict, Union
 
-from ai_migrate.storage.config import StorageType, StorageConfig
+from ai_migrate.storage.config import StorageType
 from ai_migrate.storage.config_loader import (
-    load_config, load_config_file, find_project_root,
+    load_config, find_project_root,
     create_default_config, DEFAULT_CONFIG_NAME, DEFAULT_CONFIG_CONTENT,
     PROJECT_MARKERS, find_config_file
 )

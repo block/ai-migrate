@@ -1,7 +1,7 @@
 import os
 import yaml
 from pathlib import Path
-from typing import Optional, Dict, Union, List
+from typing import Optional, Dict, Union
 
 from .config import StorageConfig
 
@@ -74,7 +74,7 @@ def load_config_file(path: Union[str, Path]) -> Dict[str, Union[Dict, str]]:
         return {}
 
     if path.suffix != '.yml':
-        raise ValueError(f"Config file must be YAML (.yml)")
+        raise ValueError("Config file must be YAML (.yml)")
 
     with open(path) as f:
         return yaml.safe_load(f) or {}

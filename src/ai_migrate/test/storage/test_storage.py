@@ -1,9 +1,7 @@
-import os
 import pytest
 from pathlib import Path
-from typing import BinaryIO
 
-from ai_migrate.storage import StorageBackend, StorageError
+from ai_migrate.storage import StorageError
 from ai_migrate.storage.local import LocalStorageBackend
 from ai_migrate.storage.config import StorageConfig, StorageType
 
@@ -63,10 +61,10 @@ def test_delete_file(local_backend):
     path = local_backend.save_content("test", "delete_me.txt")
     assert Path(path).exists()
     
-    assert local_backend.delete_file("delete_me.txt") == True
+    assert local_backend.delete_file("delete_me.txt")
     assert not Path(path).exists()
     
-    assert local_backend.delete_file("nonexistent.txt") == False
+    assert not local_backend.delete_file("nonexistent.txt")
 
 def test_invalid_storage_type():
     config = StorageConfig(type=StorageType.S3)
