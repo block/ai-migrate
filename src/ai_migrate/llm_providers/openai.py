@@ -1,5 +1,5 @@
 import tiktoken
-from typing import Any, Dict, List, Optional, Tuple, Union
+from typing import Any
 
 from openai import AsyncOpenAI
 
@@ -14,11 +14,11 @@ class OpenAIClient:
 
     async def generate_completion(
         self,
-        messages: List[Dict[str, str]],
-        tools: Optional[List[Dict[str, Any]]] = None,
+        messages: list[dict[str, str]],
+        tools: list[dict[str, Any]] | None = None,
         temperature: float = 0.1,
         max_tokens: int = 8192,
-    ) -> Tuple[Dict[str, Any], List[Dict[str, Any]]]:
+    ) -> tuple[dict[str, Any], list[dict[str, Any]]]:
         """Generate a completion
 
         Args:
@@ -65,8 +65,7 @@ class OpenAIClient:
         response, _ = await self.generate_completion(messages, temperature=temperature)
         return response["choices"][0]["message"]["content"]
 
-    def count_tokens(self, text: Union[str, List[Dict[str, Any]]]) -> int:
-        """Count the number of tokens in a string."""
+    def count_tokens(self, text: str | list[dict[str, Any]]) -> int:
         if isinstance(text, str):
             return len(tiktoken.encoding_for_model(GPT_VERSION).encode(text))
         elif isinstance(text, list):

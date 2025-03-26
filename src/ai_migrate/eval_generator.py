@@ -60,7 +60,7 @@ def generate_eval_from_migration(
 
 
 class RepoInfo(BaseModel):
-    """Pydantic model for GitHub repository information extracted from URLs."""
+    """GitHub repository information extracted from URLs."""
 
     owner: Optional[str] = None
     name: Optional[str] = None
