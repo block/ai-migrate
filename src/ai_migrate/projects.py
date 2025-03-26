@@ -69,6 +69,7 @@ async def run(
     resume: bool = True,
     llm_fakes=None,
     dont_create_evals: bool = False,
+    s3_bucket: str | None = None,
 ) -> list[FileGroup]:
     """Run an AI migration project."""
     if manifest_file:
@@ -145,7 +146,16 @@ async def run(
             await status_manager.update_message(task_name, "")
             log_buffer.close()
 
-        results.append(FileGroup(files=files.files, result=new_result))
+        result = FileGroup(files=files.files, result=new_result)
+        results.append(result)
+        if s3_bucket:
+            try:
+                from .s3_uploader import S3Uploader
+
+                uploader = S3Uploader(s3_bucket)
+                uploader.upload_migration(Path(project_dir).name, result, log_file)
+            except Exception as e:
+                print(f"Failed to upload results to S3: {e}", file=sys.stderr)
 
     sem = asyncio.Semaphore(max_workers)
 

@@ -716,6 +716,11 @@ def project_dir_option(f):
     is_flag=True,
     help="Don't automatically create evaluations after successful migrations",
 )
+@click.option(
+    "--s3-bucket",
+    help="S3 bucket name for storing migration results (can also use AI_MIGRATE_S3_BUCKET env var)",
+    default=lambda: os.environ.get("AI_MIGRATE_S3_BUCKET"),
+)
 def migrate(
     file_paths,
     project_dir,
@@ -726,6 +731,7 @@ def migrate(
     local_worktrees,
     llm_fakes,
     dont_create_evals,
+    s3_bucket,
 ):
     """Migrate one or more files or manage project resources.
 
@@ -788,6 +794,7 @@ def migrate(
             resume=True,
             llm_fakes=llm_fakes,
             dont_create_evals=dont_create_evals,
+            s3_bucket=s3_bucket,
         )
     )
 

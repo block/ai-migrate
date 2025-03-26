@@ -105,6 +105,51 @@ uv run ai-migrate merge-branches
 uv run ai-migrate migrate --help
 ```
 
+### S3 Upload Support
+
+The tool can automatically upload migration results and logs to S3. Files are organized by:
+- Project
+- Timestamp
+- Result type (pass/fail)
+- Logs
+
+To enable S3 uploads:
+
+1. Configure AWS credentials using any standard method:
+```bash
+# Environment variables
+export AWS_ACCESS_KEY_ID="your_access_key"
+export AWS_SECRET_ACCESS_KEY="your_secret_key"
+export AWS_DEFAULT_REGION="us-west-2"
+
+# Or use AWS credentials file (~/.aws/credentials)
+# Or use IAM roles if running on AWS infrastructure
+```
+
+2. Specify the S3 bucket in one of two ways:
+```bash
+# Command line argument
+uv run ai-migrate migrate --s3-bucket my-bucket path/to/files
+
+# Or environment variable
+export AI_MIGRATE_S3_BUCKET="my-bucket"
+uv run ai-migrate migrate path/to/files
+```
+
+The files will be uploaded with this structure:
+```
+bucket/
+  project-name/
+    attempt-20250326-184018/
+      pass/
+        file1.java
+        file2.java
+      fail/
+        file3.java
+      logs/
+        migration.log
+```
+
 ### Project Selection
 
 The interactive CLI now provides an easy way to select which migration project to use:
@@ -150,6 +195,7 @@ Here's how commands from the main branch map to the new interactive CLI:
 | `uv run ai-migrate projects run --rerun-passed`         | `uv run ai-migrate migrate --rerun-passed`                        | Re-run migrations that have already passed  |
 | `uv run ai-migrate projects run --max-workers=<num>`    | `uv run ai-migrate migrate --max-workers=<num>`                   | Set maximum number of parallel workers      |
 | `uv run ai-migrate projects run --local-worktrees`      | `uv run ai-migrate migrate --local-worktrees`                     | Create worktrees alongside the git repo     |
+| `uv run ai-migrate projects run --s3-bucket=<bucket>`   | `uv run ai-migrate migrate --s3-bucket=<bucket>`                  | Upload results to S3 bucket                 |
 | `uv run ai-migrate projects checkout <file>`            | `uv run ai-migrate checkout <file>`                               | Check out the branch for a failed migration |
 | `uv run ai-migrate projects merge-branches`             | `uv run ai-migrate merge-branches`                                | Merge changes from migrator branches        |
 
