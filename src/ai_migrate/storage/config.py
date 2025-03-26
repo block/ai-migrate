@@ -42,26 +42,3 @@ class StorageConfig(BaseModel):
         if v is None:
             return None
         return Path(v)
-
-    def get_backend_config(self) -> Dict[str, Union[Path, str, int, float, bool]]:
-        """Get backend-specific configuration dictionary.
-
-        @return Configuration dictionary for storage backend
-        """
-        config = self.model_dump(exclude_none=True)
-        del config["type"]
-        return {**config, **self.options}
-
-class MigrationResultConfig(BaseModel):
-    storage: StorageConfig = Field(
-        default_factory=StorageConfig,
-        description="Storage configuration for migration results"
-    )
-    compress_artifacts: bool = Field(
-        default=True,
-        description="Whether to compress migration artifacts"
-    )
-    store_failures: bool = Field(
-        default=True,
-        description="Whether to store failed migration results"
-    )

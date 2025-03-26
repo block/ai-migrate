@@ -1,23 +1,26 @@
 import os
 import yaml
-import json
 from pathlib import Path
-from typing import Optional, Dict, Union
+from typing import Optional, Dict, Union, List
 
-from .config import MigrationResultConfig, StorageConfig, StorageType
+from .config import StorageConfig
 
-DEFAULT_CONFIG_NAME = ".ai-migrate"
+DEFAULT_CONFIG_NAME = ".ai-migrate.yml"
+PROJECT_MARKERS = [
+    "pyproject.toml",
+    "setup.py",
+    "setup.cfg",
+    ".ai-migrate-root",
+    DEFAULT_CONFIG_NAME,
+]
+
 DEFAULT_CONFIG_CONTENT = {
-    "storage": {
-        "type": "local",
-        "path": "migrations"
-    },
-    "compress_artifacts": True,
-    "store_failures": True
+    "type": "local",
+    "path": "migrations"
 }
 
 def find_project_root(start_path: Union[str, Path] = None) -> Optional[Path]:
-    """Find the project root by looking for .git directory.
+    """Find the project root by looking for project marker files.
     
     @param start_path Starting path for the search (default: current directory)
     @return Path to project root or None if not found
@@ -25,49 +28,58 @@ def find_project_root(start_path: Union[str, Path] = None) -> Optional[Path]:
     current = Path(start_path or os.getcwd()).resolve()
     
     while current != current.parent:
-        if (current / ".git").exists():
-            return current
+        # Check for any of the marker files
+        for marker in PROJECT_MARKERS:
+            if (current / marker).exists():
+                return current
         current = current.parent
     
     return None
 
-def create_default_config(path: Path) -> None:
+def find_config_file(directory: Path) -> Optional[Path]:
+    """Find configuration file in the given directory.
+    
+    @param directory Directory to search in
+    @return Path to config file or None if not found
+    """
+    config_path = directory / DEFAULT_CONFIG_NAME
+    return config_path if config_path.exists() else None
+
+def create_default_config(path: Path) -> Path:
     """Create default configuration file.
     
     @param path Path where to create the config file
+    @return Path to created config file
     """
-    # Try YAML first, fall back to JSON
-    for ext in [".yml", ".yaml", ".json"]:
-        if not (path / f"{DEFAULT_CONFIG_NAME}{ext}").exists():
-            config_path = path / f"{DEFAULT_CONFIG_NAME}{ext}"
-            with open(config_path, 'w') as f:
-                if ext in [".yml", ".yaml"]:
-                    yaml.safe_dump(DEFAULT_CONFIG_CONTENT, f, default_flow_style=False)
-                else:
-                    json.dump(DEFAULT_CONFIG_CONTENT, f, indent=2)
-            return
+    config_path = path / DEFAULT_CONFIG_NAME
+    with open(config_path, 'w') as f:
+        yaml.safe_dump(DEFAULT_CONFIG_CONTENT, f, default_flow_style=False)
+    
+    # Also create root marker if it doesn't exist
+    root_marker = path / ".ai-migrate-root"
+    if not root_marker.exists():
+        root_marker.touch()
+    
+    return config_path
 
-def load_config_file(path: Union[str, Path]) -> Dict[str, Union[Dict, bool]]:
+def load_config_file(path: Union[str, Path]) -> Dict[str, Union[Dict, str]]:
     """Load configuration from a file.
     
-    @param path Path to configuration file (YAML or JSON)
+    @param path Path to configuration file
     @return Configuration dictionary
-    @throws ValueError if file format is not supported
+    @throws ValueError if file cannot be loaded
     """
     path = Path(path).expanduser()
     if not path.exists():
         return {}
 
-    if path.suffix not in ['.yml', '.yaml', '.json']:
-        raise ValueError(f"Unsupported config file format: {path.suffix}")
+    if path.suffix != '.yml':
+        raise ValueError(f"Config file must be YAML (.yml)")
 
     with open(path) as f:
-        if path.suffix in ['.yml', '.yaml']:
-            return yaml.safe_load(f) or {}
-        else:
-            return json.load(f) or {}
+        return yaml.safe_load(f) or {}
 
-def get_env_config() -> Dict[str, Union[Dict, bool]]:
+def get_env_config() -> Dict[str, Union[Dict, str]]:
     """Get configuration from environment variables.
     
     Environment variables take the form:
@@ -78,31 +90,21 @@ def get_env_config() -> Dict[str, Union[Dict, bool]]:
     @return Configuration dictionary from environment variables
     """
     config = {}
-    storage_config = {}
     
     if storage_type := os.getenv("AI_MIGRATE_STORAGE_TYPE"):
-        storage_config["type"] = storage_type
+        config["type"] = storage_type
     
     if storage_path := os.getenv("AI_MIGRATE_STORAGE_PATH"):
-        storage_config["path"] = storage_path
+        config["path"] = storage_path
     
     if auth_file := os.getenv("AI_MIGRATE_STORAGE_AUTH_FILE"):
-        storage_config["auth_file"] = auth_file
+        config["auth_file"] = auth_file
     
     if bucket := os.getenv("AI_MIGRATE_STORAGE_BUCKET"):
-        storage_config["bucket"] = bucket
+        config["bucket"] = bucket
     
     if prefix := os.getenv("AI_MIGRATE_STORAGE_PREFIX"):
-        storage_config["prefix"] = prefix
-
-    if storage_config:
-        config["storage"] = storage_config
-
-    if compress := os.getenv("AI_MIGRATE_COMPRESS_ARTIFACTS"):
-        config["compress_artifacts"] = compress.lower() in ('true', '1', 'yes')
-    
-    if store_failures := os.getenv("AI_MIGRATE_STORE_FAILURES"):
-        config["store_failures"] = store_failures.lower() in ('true', '1', 'yes')
+        config["prefix"] = prefix
     
     return config
 
@@ -125,7 +127,7 @@ def deep_merge(base: Dict, override: Dict) -> Dict:
             result[key] = value
     return result
 
-def load_config(project_path: Optional[Union[str, Path]] = None) -> MigrationResultConfig:
+def load_config(project_path: Optional[Union[str, Path]] = None) -> StorageConfig:
     """Load configuration from files and environment.
     
     Priority (highest to lowest):
@@ -135,7 +137,7 @@ def load_config(project_path: Optional[Union[str, Path]] = None) -> MigrationRes
     4. Built-in defaults
     
     @param project_path Optional path within project (default: current directory)
-    @return MigrationResultConfig instance
+    @return StorageConfig instance
     """
     config = DEFAULT_CONFIG_CONTENT.copy()
     
@@ -143,35 +145,34 @@ def load_config(project_path: Optional[Union[str, Path]] = None) -> MigrationRes
     project_root = find_project_root(project_path)
     if project_root:
         # Try to load default config from project root
-        for ext in ['.yml', '.yaml', '.json']:
+        if root_config_path := find_config_file(project_root):
             try:
-                root_config_path = project_root / f"{DEFAULT_CONFIG_NAME}{ext}"
-                if root_config_path.exists():
-                    if root_config := load_config_file(root_config_path):
-                        config = deep_merge(config, root_config)
-                        break
+                if root_config := load_config_file(root_config_path):
+                    config = deep_merge(config, root_config)
             except (OSError, ValueError):
-                continue
-            
-        # If no config exists, create default
-        if all(not (project_root / f"{DEFAULT_CONFIG_NAME}{ext}").exists() 
-               for ext in ['.yml', '.yaml', '.json']):
-            create_default_config(project_root)
+                pass
+        else:
+            # Create default config if none exists
+            root_config_path = create_default_config(project_root)
+            try:
+                if root_config := load_config_file(root_config_path):
+                    config = deep_merge(config, root_config)
+            except (OSError, ValueError):
+                pass
         
         # If project_path is provided and different from root, look for project-specific config
         if project_path:
             project_dir = Path(project_path)
             if project_dir != project_root:
-                for ext in ['.yml', '.yaml', '.json']:
+                if project_config_path := find_config_file(project_dir):
                     try:
-                        if project_config := load_config_file(project_dir / f"{DEFAULT_CONFIG_NAME}{ext}"):
+                        if project_config := load_config_file(project_config_path):
                             config = deep_merge(config, project_config)
-                            break
                     except (OSError, ValueError):
-                        continue
+                        pass
     
     # Override with environment variables
     env_config = get_env_config()
     config = deep_merge(config, env_config)
     
-    return MigrationResultConfig.model_validate(config)
+    return StorageConfig.model_validate(config)
