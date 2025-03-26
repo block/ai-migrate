@@ -30,6 +30,7 @@ from prompt_toolkit import prompt
 from prompt_toolkit.completion import PathCompleter
 
 from ai_migrate.git import get_branches, get_worktrees
+from ai_migrate.projects_root import get_project_dir
 from .pr_utils import (
     setup_project_from_pr,
     get_pr_details,
@@ -636,9 +637,13 @@ def init(interactive):
 
 
 def project_dir_option(f):
-    def project_dir_validate(_ctx, param, project_dir):
-        if param.name == "project_dir" and project_dir:
-            project_dir = Path(__file__).parent.parent.parent / "projects" / project_dir
+    def project_dir_validate(ctx, param, project_dir):
+        if "project_dir" in ctx.params:
+            return ctx.params["project_dir"]
+
+        if "--project" in param.opts:
+            project_dir = get_project_dir(project_dir)
+            return project_dir
 
         if not project_dir:
             project_dir = os.environ.get("AI_MIGRATE_PROJECT_DIR")
@@ -938,6 +943,13 @@ def script(script, project_dir):
 
     console.print(f"Running script: [bold cyan]{script_path}[/bold cyan]")
     subprocess.run(command, check=True)
+
+
+@cli.command()
+@project_dir_option
+def current_project(project_dir):
+    """Show the project directory."""
+    console.print(f"Project directory: [bold cyan]{project_dir}[/bold cyan]")
 
 
 def main():

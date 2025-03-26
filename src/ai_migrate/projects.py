@@ -11,12 +11,10 @@ from ai_migrate.git import get_branches
 from .manifest import (
     FileEntry,
     Manifest,
-    SYSTEM_PROMPT_FILE,
-    VERIFY_SCRIPT_FILE,
     FileGroup,
     Directory,
 )
-from .migrate import run as run_migration, SYSTEM_MESSAGE, FailedPreVerification
+from .migrate import run as run_migration, FailedPreVerification
 from .progress import StatusManager
 
 
@@ -199,53 +197,6 @@ async def run(
 
     print(f"Results saved to {results_file}")
     return results
-
-
-def init(
-    path: str, pr: str = None, description: str = None, file_extension: str = "java"
-):
-    """Initialize a new AI migration project at the specified path.
-
-    Args:
-        path: Path where the project should be created
-        pr: Optional PR number to use as a basis for the project
-        description: Optional short description of the migration task
-        file_extension: File extension for the migrated files
-    """
-    project_dir = Path(path).expanduser()
-
-    if pr:
-        # Use PR-based initialization if PR number is provided
-        if not description:
-            description = "Code migration task"
-
-        import asyncio
-        from .pr_utils import setup_project_from_pr
-
-        asyncio.run(setup_project_from_pr(pr, path, description, file_extension))
-        return
-
-    # Traditional initialization
-    if project_dir.exists() and any(project_dir.iterdir()):
-        raise ValueError(f"Directory {project_dir} already exists and is not empty")
-    project_dir.mkdir(exist_ok=True)
-    for child in (
-        "evals",
-        "examples",
-    ):
-        (project_dir / child).mkdir(exist_ok=True)
-        print(f"Created {project_dir / child}")
-
-    system_prompt = project_dir / SYSTEM_PROMPT_FILE
-    system_prompt.write_text(SYSTEM_MESSAGE)
-    print("Created default system prompt at", system_prompt)
-
-    verify_script = project_dir / VERIFY_SCRIPT_FILE
-    verify_script.touch()
-    print("Created empty verify script at", verify_script)
-
-    print("To make this your default project,")
-    print(f"    export AI_MIGRATE_PROJECT_DIR={project_dir.resolve()}")
 
 
 def verify(project_dir: str, files: Iterable[str], manifest_file: str | None):
