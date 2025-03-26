@@ -718,8 +718,8 @@ def project_dir_option(f):
 )
 @click.option(
     "--s3-bucket",
-    help="S3 bucket name for storing migration results (can also use AI_MIGRATE_S3_BUCKET env var)",
-    default=lambda: os.environ.get("AI_MIGRATE_S3_BUCKET"),
+    help="S3 bucket name for storing migration results (can also use AI_MIGRATE_S3_BUCKET env var). Pass 'localhost' to save locally to '~/ai-migration-results'",
+    envvar="AI_MIGRATE_S3_BUCKET",
 )
 def migrate(
     file_paths,

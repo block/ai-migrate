@@ -141,14 +141,17 @@ The files will be uploaded with this structure:
 bucket/
   project-name/
     attempt-20250326-184018/
+      manifest.json
       pass/
         file1.java
         file2.java
       fail/
         file3.java
-      logs/
-        migration.log
 ```
+
+#### Note
+ If you set the bucket name to `localhost` - the system will save the results locally to `~/ai-migration-results`
+
 
 ### Project Selection
 
