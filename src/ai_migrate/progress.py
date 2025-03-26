@@ -8,7 +8,7 @@ import shutil
 class StatusBar:
     def __init__(self, name: str = "Task"):
         self.name = name
-        self.status = None 
+        self.status = None
         self.message = ""
         self.spinner_chars = "⠋⠙⠹⠸⠼⠴⠦⠧⠇⠏"
         self.spinner_iter = itertools.cycle(self.spinner_chars)
