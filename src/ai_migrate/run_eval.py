@@ -144,8 +144,8 @@ def run_project_eval(project, verbose=False):
                     "--manifest-file",
                     str(manifest_file),
                     "--local-worktrees",
-                    "--project",
-                    project,
+                    "--project-dir",
+                    str(project_dir),
                 ]
                 if (fakes_directory := directory / "llm-fakes").exists():
                     command.extend(["--llm-fakes", str(fakes_directory)])
