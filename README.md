@@ -23,8 +23,8 @@ Migration:
 1. Clone this repository:
 
 ```bash
-gh repo clone block/ai_migrate
-cd ai_migrate
+gh repo clone block/ai-migrate
+cd ai-migrate
 ```
 
 2. Set up the development environment using Hermit:
