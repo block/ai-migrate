@@ -1,5 +1,6 @@
 from itertools import cycle
 from pathlib import Path
+from typing import Any, Dict, List, Union
 
 
 class FakeLLMClient:
@@ -11,3 +12,14 @@ class FakeLLMClient:
     ):
         response_body = next(self.responses)
         return {"choices": [{"message": {"content": response_body}}]}, messages
+
+    def count_tokens(self, text: Union[str, List[Dict[str, Any]]]) -> int:
+        if isinstance(text, str):
+            return len(text)
+        elif isinstance(text, list):
+            return sum(self.count_tokens(item["content"]) for item in text)
+        else:
+            raise ValueError(f"Unsupported text type: {type(text)}")
+
+    def max_context_tokens(self) -> int:
+        return -1
