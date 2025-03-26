@@ -29,6 +29,7 @@ from rich.markdown import Markdown
 from prompt_toolkit import prompt
 from prompt_toolkit.completion import PathCompleter
 
+from ai_migrate.git import get_branches, get_worktrees
 from .pr_utils import (
     setup_project_from_pr,
     get_pr_details,
@@ -36,7 +37,7 @@ from .pr_utils import (
     save_examples,
     generate_system_prompt,
 )
-from .manifest import SYSTEM_PROMPT_FILE
+from .manifest import SYSTEM_PROMPT_FILE, Manifest
 from .migrate import SYSTEM_MESSAGE
 from .eval_generator import generate_eval_from_pr
 from ai_migrate.llm_providers import DefaultClient
@@ -743,11 +744,15 @@ def migrate(
     if not file_paths and not manifest_file:
         if (make_manifest_script := (Path(project_dir) / "make_manifest.py")).exists():
             console.print("Found make_manifest.py in project directory. Running...")
-            manifest_json = subprocess.run(
-                [sys.executable, make_manifest_script],
-                capture_output=True,
-                check=True,
-            ).stdout.decode()
+            try:
+                manifest_json = subprocess.run(
+                    [sys.executable, make_manifest_script],
+                    capture_output=True,
+                    check=True,
+                ).stdout.decode()
+            except subprocess.CalledProcessError as e:
+                show_error_message("Error running make_manifest.py", e.stderr.decode())
+                raise
             dt = datetime.now().strftime("%Y%m%d-%H%M%S")
             manifest_file = f"manifest-{dt}.json"
             with open(manifest_file, "w") as f:
@@ -796,7 +801,11 @@ def migrate(
 
 @cli.command()
 @click.option("--project-dir", help="Path to the project directory")
-def status(project_dir):
+@click.option("--manifest")
+def status(
+    project_dir,
+    manifest,
+):
     """Show the status of migration projects."""
 
     from .projects import status as projects_status
@@ -826,13 +835,13 @@ def checkout(file_path, project_dir):
 
 
 @cli.command()
-@project_dir_option
-def merge_branches(project_dir):
+@click.argument("manifest")
+def merge_branches(manifest):
     """Merge the changes from the migrator branches."""
     from .merge_migrator_changes import merge
 
     result, error = run_with_progress(
-        "Merging changes from migrator branches...", merge
+        "Merging changes from migrator branches...", merge, manifest
     )
 
     if error:
@@ -883,6 +892,52 @@ def logs(run_id):
 @click.argument("pr_num")
 def add_examples_from_pr(pr_num, project_dir):
     setup_from_pr(pr_num, Path(project_dir) / "examples")
+
+
+@cli.command()
+@click.argument("manifest")
+@click.option("--force", default=False, is_flag=True)
+def cleanup_git_branches(manifest, force):
+    """Clean up git worktrees and branches created by the migrator."""
+    branches = {
+        branch
+        for _, branch, *_ in get_branches(
+            Manifest.model_validate_json(Path(manifest).read_text())
+        )
+    }
+
+    subprocess.run(["git", "worktree", "prune"], check=True)
+    for worktree, branch, prunable in get_worktrees():
+        if branch in branches:
+            if prunable or force:
+                subprocess.run(["git", "worktree", "remove", "--force", worktree])
+            else:
+                console.print(
+                    f"[yellow]Worktree {worktree} for branch {branch} is not prunable. Use --force to remove it.[/yellow]"
+                )
+                branches.remove(branch)
+
+    for branch in branches:
+        assert branch.startswith("ai-migrator/")
+        subprocess.run(["git", "branch", "-D" if force else "-d", branch])
+
+
+@cli.command()
+@project_dir_option
+@click.argument("script")
+def script(script, project_dir):
+    """Run a script from the project directory"""
+    script_path = Path(project_dir) / script
+    if (py_script := script_path.with_suffix(".py")).exists():
+        command = [sys.executable, py_script]
+    elif (sh_script := script_path.with_suffix(".sh")).exists():
+        command = [sh_script]
+    else:
+        show_error_message(f"Script {script} not found in project directory.")
+        return
+
+    console.print(f"Running script: [bold cyan]{script_path}[/bold cyan]")
+    subprocess.run(command, check=True)
 
 
 def main():

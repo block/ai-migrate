@@ -1,9 +1,9 @@
 import asyncio
 import contextvars
 import os
+import shutil
 import sys
 import tempfile
-import time
 from dataclasses import dataclass
 from pathlib import Path
 import subprocess
@@ -528,6 +528,10 @@ class FailedPreVerification(Exception):
     pass
 
 
+async def remove_worktree(worktree_root: str | Path):
+    await asyncio.to_thread(shutil.rmtree, worktree_root, ignore_errors=True)
+
+
 def build_messages(
     initial_messages: list[dict], iteration_messages: list[list[dict]]
 ) -> list[dict]:
@@ -591,234 +595,218 @@ async def _run(
 
     iteration_messages = []
 
-    try:
-        if pre_verify_cmd:
-            log("Running pre-verification")
-            try:
-                await subprocess_run(
-                    [*pre_verify_cmd.split(), *target_files],
-                    prefix="pre-verify",
-                    check=True,
-                    cwd=worktree_root,
-                )
-            except subprocess.CalledProcessError:
-                log(
-                    "Pre-verification failed. The migration cannot continue until all files pass the pre-verify step"
-                )
-                raise FailedPreVerification(
-                    f"file {target_files} failed pre-verification"
-                )
+    if pre_verify_cmd:
+        log("Running pre-verification")
+        try:
+            await subprocess_run(
+                [*pre_verify_cmd.split(), *target_files],
+                prefix="pre-verify",
+                check=True,
+                cwd=worktree_root,
+            )
+        except subprocess.CalledProcessError:
+            log(
+                "Pre-verification failed. The migration cannot continue until all files pass the pre-verify step"
+            )
+            raise FailedPreVerification(f"file {target_files} failed pre-verification")
 
-        if not target_dir:
-            for target_file in target_files:
-                os.remove(target_file)
-                await subprocess_run(
-                    ["git", "add", target_file],
-                    cwd=worktree_root,
-                )
+    if not target_dir:
+        for target_file in target_files:
+            os.remove(target_file)
+            await subprocess_run(
+                ["git", "add", target_file],
+                cwd=worktree_root,
+            )
 
-        for tries in range(int(os.getenv("AI_MIGRATE_MAX_TRIES", 10))):
-            log(f"[agent] Running migration attempt {tries + 1}")
+    for tries in range(int(os.getenv("AI_MIGRATE_MAX_TRIES", 10))):
+        log(f"[agent] Running migration attempt {tries + 1}")
 
+        messages = build_messages(messages, iteration_messages)
+        log(f"[agent] Messages length: {client.count_tokens(messages)}")
+        while 0 < client.max_context_tokens() < client.count_tokens(messages):
+            log(f"Trimming iteration messages: {len(iteration_messages)}")
+            # Fall back to 3 examples + trim iterations 1 at a time.
+            messages, _ = messages_and_tools(examples[:3], target, system_prompt)
+            iteration_messages = iteration_messages[1:]
             messages = build_messages(messages, iteration_messages)
-            log(f"[agent] Messages length: {client.count_tokens(messages)}")
-            while (
-                client.max_context_tokens() > 0
-                and client.count_tokens(messages) > client.max_context_tokens()
-            ):
-                log(f"Trimming iteration messages: {len(iteration_messages)}")
-                # Fall back to 3 examples + trim iterations 1 at a time.
-                messages, _ = messages_and_tools(examples[:3], target, system_prompt)
-                iteration_messages = iteration_messages[1:]
-                messages = build_messages(messages, iteration_messages)
 
-            response, messages = await call_llm(client, messages, tools)
+        response, messages = await call_llm(client, messages, tools)
 
-            response_text = response["choices"][0]["message"]["content"]
-            parsed_result = extract_code_blocks(response_text)
+        response_text = response["choices"][0]["message"]["content"]
+        parsed_result = extract_code_blocks(response_text)
 
-            iteration_message = []
-            if not parsed_result.code_blocks:
-                iteration_message.append(
-                    {"role": ROLE_ASSISTANT, "content": response_text}
-                )
-                iteration_message.append(
-                    {
-                        "role": ROLE_USER,
-                        "content": "Include the full, complete code block. Do not omit any part of the file",
-                    }
-                )
-                continue
-
-            with open(f"response-{time.time()}.md", "w") as f:
-                f.write(response_text)
-
-            written_files = set()
-            for code_block in parsed_result.code_blocks:
-                migrated_code = un_escape_nbsp(code_block.code)
-
-                if code_block.filename:
-                    written_files.add(code_block.filename)
-                    if target_dir:
-                        output_path = (
-                            Path(worktree_root)
-                            / target_dir_rel_path
-                            / target_basename
-                            / code_block.filename
-                        )
-                    else:
-                        output_path = Path(worktree_root) / code_block.filename
-                    output_path.parent.mkdir(parents=True, exist_ok=True)
-
-                    with open(output_path, "w") as f:
-                        f.write(migrated_code)
-
-            all_files_to_verify |= written_files
-
-            # Add the files to verify with the correct paths
-            if target_dir:
-                full_verify_cmd = [
-                    *verify_cmd,
-                    str(Path(target_dir_rel_path) / target_basename),
-                ]
-            else:
-                full_verify_cmd = [
-                    *verify_cmd,
-                    *[str(Path(worktree_root) / f) for f in all_files_to_verify],
-                ]
-
-            log(f"Running verification: {full_verify_cmd}")
-            verify_process = await asyncio.create_subprocess_exec(
-                *full_verify_cmd,
-                cwd=worktree_root,
-                stdout=subprocess.PIPE,
-                stderr=subprocess.PIPE,
-            )
-            stdout, stderr = await verify_process.communicate()
-
-            status = "pass" if verify_process.returncode == 0 else "fail"
-
-            commit_message = f"Migration attempt {tries + 1} {status=}:\n\nLLM response:\n{parsed_result.other_text}"
-
-            for file in written_files:
-                if target_dir:
-                    file_path = (
-                        Path(worktree_root)
-                        / target_dir_rel_path
-                        / target_basename
-                        / file
-                    )
-                    git_path = Path(file_path).relative_to(worktree_root)
-                    await subprocess_run(
-                        ["git", "add", git_path],
-                        cwd=worktree_root,
-                    )
-                else:
-                    await subprocess_run(
-                        ["git", "add", file],
-                        cwd=worktree_root,
-                    )
-
-            await subprocess_run(
-                ["git", "commit", "--allow-empty", "-m", commit_message],
-                check=True,
-                cwd=worktree_root,
-                env={**os.environ, **environment_variables()},
-            )
-
-            verification_output = (stderr or stdout or b"").decode()
-            await subprocess_run(
-                [
-                    "git",
-                    "notes",
-                    "--ref=migrator-verify",
-                    "add",
-                    "-f",
-                    "-m",
-                    verification_output,
-                ],
-                check=True,
-                cwd=worktree_root,
-            )
-
-            if verify_process.returncode == 0:
-                log("Verification successful")
-
-                if not dont_create_evals:
-                    original_contents = {}
-                    for target_file in target_files:
-                        full_path = Path(target_file).absolute()
-                        short_name = full_path.relative_to(worktree_root)
-                        try:
-                            with open(full_path, "r") as f:
-                                original_contents[str(short_name)] = f.read()
-                        except Exception as e:
-                            log(f"Error reading {full_path}: {e}")
-
-                    transformed_contents = {}
-                    for file_path in written_files:
-                        full_path = Path(worktree_root) / file_path
-                        try:
-                            with open(full_path, "r") as f:
-                                transformed_contents[file_path] = f.read()
-                        except Exception as e:
-                            log(f"Error reading transformed file {full_path}: {e}")
-
-                    try:
-                        project_dir = Path(examples_dir).parent
-
-                        eval_manifest = Manifest(
-                            files=[
-                                FileEntry(filename=fname, result="pass")
-                                for fname in written_files
-                            ],
-                            verify_cmd=" ".join(verify_cmd)
-                            if isinstance(verify_cmd, list)
-                            else verify_cmd,
-                        )
-                        if pre_verify_cmd:
-                            eval_manifest.pre_verify_cmd = pre_verify_cmd
-
-                        eval_dir = generate_eval_from_migration(
-                            project_dir,
-                            original_contents,
-                            transformed_contents,
-                            eval_manifest,
-                        )
-                        log(f"Created evaluation at {eval_dir}")
-                    except Exception as e:
-                        log(f"Error creating evaluation: {e}")
-                        log(f"Exception type: {type(e).__name__}")
-
-                break
-            log("Verification failed:")
-            for line in verification_output.splitlines():
-                log(f"[verify] {line}")
-
-            lookup_symbol_prompt = (
-                f"Use the {FN_LOOKUP_SYMBOL} tool to find the definition of any symbols related to this problem. "
-                "Then apply the necessary changes to the code. Don't guess or assume functionality."
-                "From now on, only re-write files, don't rename them."
-            )
-            if os.environ.get("AI_MIGRATE_DISABLE_TOOLS", "").lower() in (
-                "true",
-                "1",
-                "yes",
-            ):
-                lookup_symbol_prompt = ""
-
+        iteration_message = []
+        if not parsed_result.code_blocks:
             iteration_message.append({"role": ROLE_ASSISTANT, "content": response_text})
             iteration_message.append(
                 {
                     "role": ROLE_USER,
-                    "content": f"The code did not compile. The error was: {verification_output}. "
-                    f"{lookup_symbol_prompt}",
+                    "content": "Include the full, complete code block. Do not omit any part of the file",
                 }
             )
-            iteration_messages.append(iteration_message)
+            continue
 
+        written_files = set()
+        for code_block in parsed_result.code_blocks:
+            migrated_code = un_escape_nbsp(code_block.code)
+
+            if code_block.filename:
+                written_files.add(code_block.filename)
+                if target_dir:
+                    output_path = (
+                        Path(worktree_root)
+                        / target_dir_rel_path
+                        / target_basename
+                        / code_block.filename
+                    )
+                else:
+                    output_path = Path(worktree_root) / code_block.filename
+                output_path.parent.mkdir(parents=True, exist_ok=True)
+
+                with open(output_path, "w") as f:
+                    f.write(migrated_code)
+
+        all_files_to_verify |= written_files
+
+        # Add the files to verify with the correct paths
+        if target_dir:
+            full_verify_cmd = [
+                *verify_cmd,
+                str(Path(target_dir_rel_path) / target_basename),
+            ]
         else:
-            raise ValueError("Migration failed: Out of tries")
-    finally:
-        with open("messages.json", "w") as f:
-            json.dump(messages, f, indent=2)
+            full_verify_cmd = [
+                *verify_cmd,
+                *[str(Path(worktree_root) / f) for f in all_files_to_verify],
+            ]
+
+        log(f"Running verification: {full_verify_cmd}")
+        verify_process = await asyncio.create_subprocess_exec(
+            *full_verify_cmd,
+            cwd=worktree_root,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+        )
+        stdout, stderr = await verify_process.communicate()
+
+        status = "pass" if verify_process.returncode == 0 else "fail"
+
+        commit_message = f"Migration attempt {tries + 1} {status=}:\n\nLLM response:\n{parsed_result.other_text}"
+
+        for file in written_files:
+            if target_dir:
+                file_path = (
+                    Path(worktree_root) / target_dir_rel_path / target_basename / file
+                )
+                git_path = Path(file_path).relative_to(worktree_root)
+                await subprocess_run(
+                    ["git", "add", git_path],
+                    cwd=worktree_root,
+                )
+            else:
+                await subprocess_run(
+                    ["git", "add", file],
+                    cwd=worktree_root,
+                )
+
+        await subprocess_run(
+            ["git", "commit", "--allow-empty", "-m", commit_message],
+            check=True,
+            cwd=worktree_root,
+            env={**os.environ, **environment_variables()},
+        )
+
+        verification_output = (stderr or stdout or b"").decode()
+        await subprocess_run(
+            [
+                "git",
+                "notes",
+                "--ref=migrator-verify",
+                "add",
+                "-f",
+                "-m",
+                verification_output,
+            ],
+            check=True,
+            cwd=worktree_root,
+        )
+
+        if verify_process.returncode == 0:
+            log("Verification successful")
+
+            if not dont_create_evals:
+                original_contents = {}
+                for target_file in target_files:
+                    full_path = Path(target_file).absolute()
+                    short_name = full_path.relative_to(worktree_root)
+                    try:
+                        with open(full_path, "r") as f:
+                            original_contents[str(short_name)] = f.read()
+                    except Exception as e:
+                        log(f"Error reading {full_path}: {e}")
+
+                transformed_contents = {}
+                for file_path in written_files:
+                    full_path = Path(worktree_root) / file_path
+                    try:
+                        with open(full_path, "r") as f:
+                            transformed_contents[file_path] = f.read()
+                    except Exception as e:
+                        log(f"Error reading transformed file {full_path}: {e}")
+
+                try:
+                    project_dir = Path(examples_dir).parent
+
+                    eval_manifest = Manifest(
+                        files=[
+                            FileEntry(filename=fname, result="pass")
+                            for fname in written_files
+                        ],
+                        verify_cmd=" ".join(verify_cmd)
+                        if isinstance(verify_cmd, list)
+                        else verify_cmd,
+                    )
+                    if pre_verify_cmd:
+                        eval_manifest.pre_verify_cmd = pre_verify_cmd
+
+                    eval_dir = generate_eval_from_migration(
+                        project_dir,
+                        original_contents,
+                        transformed_contents,
+                        eval_manifest,
+                    )
+                    log(f"Created evaluation at {eval_dir}")
+                except Exception as e:
+                    log(f"Error creating evaluation: {e}")
+                    log(f"Exception type: {type(e).__name__}")
+
+            await remove_worktree(worktree_root)
+            break
+        log("Verification failed:")
+        for line in verification_output.splitlines():
+            log(f"[verify] {line}")
+
+        lookup_symbol_prompt = (
+            f"Use the {FN_LOOKUP_SYMBOL} tool to find the definition of any symbols related to this problem. "
+            "Then apply the necessary changes to the code. Don't guess or assume functionality."
+            "From now on, only re-write files, don't rename them."
+        )
+        if os.environ.get("AI_MIGRATE_DISABLE_TOOLS", "").lower() in (
+            "true",
+            "1",
+            "yes",
+        ):
+            lookup_symbol_prompt = ""
+
+        iteration_message.append({"role": ROLE_ASSISTANT, "content": response_text})
+        iteration_message.append(
+            {
+                "role": ROLE_USER,
+                "content": f"The code did not compile. The error was: {verification_output}. "
+                f"{lookup_symbol_prompt}",
+            }
+        )
+        iteration_messages.append(iteration_message)
+
+    else:
+        raise ValueError("Migration failed: Out of tries")

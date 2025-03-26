@@ -268,8 +268,9 @@ def pre_verify(project_dir: str, file: str, manifest_file: str | None):
     subprocess.run([*verify_cmd.split(), file], check=True)
 
 
-def status():
-    branches = get_branches()
+def status(manifest_file: str):
+    manifest = Manifest.model_validate_json(Path(manifest_file).read_text())
+    branches = get_branches(manifest)
     passing = []
     failing = []
     failed_to_start = []
