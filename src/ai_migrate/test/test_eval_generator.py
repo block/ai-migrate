@@ -59,7 +59,7 @@ def temp_worktree():
 @pytest.fixture
 def fake_llm_client():
     """Create a FakeLLMClient with test responses."""
-    responses_dir = Path(__file__).parent / "test" / "eval_test_data"
+    responses_dir = Path(__file__).parent / "eval_test_data"
     return FakeLLMClient(responses_dir)
 
 

@@ -1,7 +1,7 @@
 import tempfile
 
 from ai_migrate.manifest import Manifest
-from .manifest import Directory, FileGroup
+from ai_migrate.manifest import Directory, FileGroup
 from pathlib import Path
 
 
@@ -144,7 +144,7 @@ def test_normalize_files():
 
 def test_directory_to_file_group():
     """Test that Directory.to_file_group correctly converts a Directory to a FileGroup."""
-    from .manifest import Directory, flatten, sha256
+    from ai_migrate.manifest import Directory, flatten, sha256
     import tempfile
     from pathlib import Path
 
@@ -233,7 +233,7 @@ def test_directory_to_file_group():
 
 def test_directory_with_multiple_extensions():
     """Test that Directory.to_file_group correctly handles glob patterns with multiple extensions."""
-    from .manifest import Directory
+    from ai_migrate.manifest import Directory
     import tempfile
     from pathlib import Path
 
@@ -285,7 +285,7 @@ def test_directory_with_multiple_extensions():
 
 def test_manifest_with_target_dir():
     """Test that a manifest with a target_dir is correctly parsed."""
-    from .manifest import Manifest
+    from ai_migrate.manifest import Manifest
 
     json = """
 {

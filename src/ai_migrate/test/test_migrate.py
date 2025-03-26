@@ -15,7 +15,7 @@ from ai_migrate.migrate import (
 
 @pytest.fixture
 def examples_dir():
-    return Path(__file__).parent / "test" / "examples"
+    return Path(__file__).parent / "examples"
 
 
 def test_read_file_pairs_from(examples_dir):
