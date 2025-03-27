@@ -3,7 +3,6 @@ import json
 import re
 import subprocess
 from pathlib import Path
-from typing import Dict, List, Tuple
 
 from ai_migrate.llm_providers import DefaultClient
 
@@ -36,7 +35,7 @@ async def _run_gh_command(args: list) -> str:
     return stdout.decode()
 
 
-async def get_pr_details(pr_url: str) -> Dict:
+async def get_pr_details(pr_url: str) -> dict:
     """Get details about a PR using the GitHub CLI.
 
     Args:
@@ -145,7 +144,7 @@ async def get_file_content(pr_url: str, file_path: str, base: bool = False) -> s
     raise ValueError(f"Unable to retrieve content for {file_path}")
 
 
-async def generate_system_prompt(pr_details: Dict, description: str) -> str:
+async def generate_system_prompt(pr_details: dict, description: str) -> str:
     """Generate a system prompt based on PR details and a description.
 
     Args:
@@ -186,8 +185,8 @@ The system prompt should be concise but comprehensive, focusing on the patterns 
 
 
 async def extract_example_patterns(
-    pr_url: str, pr_details: Dict
-) -> List[Tuple[str, str]]:
+    pr_url: str, pr_details: dict
+) -> list[tuple[str, str]]:
     """Extract example patterns from a PR.
 
     Returns:
@@ -303,7 +302,7 @@ The examples should be minimal but clearly demonstrate the key changes involved 
 
 
 async def save_examples(
-    examples: List[Tuple[str, str]], examples_dir: Path, file_extension: str = "java"
+    examples: list[tuple[str, str]], examples_dir: Path, file_extension: str = "java"
 ):
     """Save example pairs to files.
 
@@ -326,7 +325,7 @@ async def save_examples(
 
 
 async def generate_verify_script(
-    pr_details: Dict, project_dir: Path, file_extension: str
+    pr_details: dict, project_dir: Path, file_extension: str
 ) -> str:
     """Generate a verification script based on PR details.
 

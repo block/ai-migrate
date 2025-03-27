@@ -34,7 +34,7 @@ class FileGroup(BaseModel):
 
 class Directory(BaseModel):
     dir: str
-    glob: str = "**/*"  # Default to all files
+    glob: str = "**/*"
     result: str = "?"
 
     def group_name(self) -> str:

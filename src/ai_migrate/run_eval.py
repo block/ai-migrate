@@ -216,11 +216,9 @@ def main():
 
     args = parser.parse_args()
 
-    # Configure logging based on arguments
     log_level = getattr(logging, args.log_level)
     logger.setLevel(log_level)
 
-    # Add file handler if log file is specified
     if args.log_file:
         file_handler = logging.FileHandler(args.log_file)
         file_handler.setFormatter(
@@ -263,7 +261,6 @@ def main():
         total_results["failed_evals"] += result["failed"]
         total_results["projects"].append(result)
 
-    # Print summary
     logger.info("=" * 50)
     logger.info("EVALUATION SUMMARY")
     logger.info("=" * 50)
