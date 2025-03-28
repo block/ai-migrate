@@ -5,6 +5,7 @@ import subprocess
 from pathlib import Path
 
 from ai_migrate.llm_providers import DefaultClient
+from ai_migrate.utils import generate_system_prompt, PRDetails
 
 
 async def _run_gh_command(args: list) -> str:
@@ -35,15 +36,7 @@ async def _run_gh_command(args: list) -> str:
     return stdout.decode()
 
 
-async def get_pr_details(pr_url: str) -> dict:
-    """Get details about a PR using the GitHub CLI.
-
-    Args:
-        pr_url: The PR URL or reference (e.g., 'https://github.com/owner/repo/pull/123' or 'owner/repo#123')
-
-    Returns:
-        A dictionary with PR details
-    """
+async def get_pr_details(pr_url: str) -> PRDetails:
     json_output = await _run_gh_command(
         [
             "pr",
@@ -54,7 +47,7 @@ async def get_pr_details(pr_url: str) -> dict:
         ]
     )
 
-    return json.loads(json_output)
+    return PRDetails(**json.loads(json_output))
 
 
 async def get_file_diff(pr_url: str, file_path: str) -> str:
@@ -144,48 +137,8 @@ async def get_file_content(pr_url: str, file_path: str, base: bool = False) -> s
     raise ValueError(f"Unable to retrieve content for {file_path}")
 
 
-async def generate_system_prompt(pr_details: dict, description: str) -> str:
-    """Generate a system prompt based on PR details and a description.
-
-    Args:
-        pr_details: The PR details
-        description: A short description of the migration task
-
-    Returns:
-        The generated system prompt
-    """
-    client = DefaultClient()
-
-    system_prompt = """You are an expert at creating system prompts for code migration tasks.
-Given information about a pull request that demonstrates a code migration pattern, 
-create a clear, concise system prompt that will guide an AI to perform similar migrations on other files."""
-
-    user_prompt = f"""
-I need to create a system prompt for a code migration task. Here are the details:
-
-Description: {description}
-
-Pull Request Title: {pr_details["title"]}
-Pull Request Description: {pr_details["body"]}
-
-Files Changed: {len(pr_details["files"])}
-Total Additions: {pr_details["additions"]}
-Total Deletions: {pr_details["deletions"]}
-
-Create a system prompt that clearly explains:
-1. The migration goal
-2. Key patterns to look for
-3. How to transform the code
-4. Any important constraints or considerations
-
-The system prompt should be concise but comprehensive, focusing on the patterns demonstrated in the PR.
-"""
-
-    return await client.generate_text(system_prompt, user_prompt)
-
-
 async def extract_example_patterns(
-    pr_url: str, pr_details: dict
+    pr_url: str, pr_details: PRDetails
 ) -> list[tuple[str, str]]:
     """Extract example patterns from a PR.
 
@@ -194,8 +147,8 @@ async def extract_example_patterns(
     """
     client = DefaultClient()
 
-    files_to_analyze = pr_details.get("files", [])
-    if not files_to_analyze and "changedFiles" in pr_details:
+    files_to_analyze = pr_details.files
+    if not files_to_analyze and hasattr(pr_details, "changedFiles"):
         try:
             files_json = await _run_gh_command(
                 ["pr", "view", pr_url, "--json", "files"]
@@ -271,7 +224,7 @@ Respond with two code blocks labeled BEFORE and AFTER containing your minimal ex
         except Exception as e:
             print(f"Error processing file {file_path}: {e}")
 
-    if not examples and pr_details.get("title") and pr_details.get("body"):
+    if not examples and pr_details.title and pr_details.body:
         try:
             system_prompt = """You are an expert at creating code examples for migration patterns.
 Given a PR title and description, create a minimal example that demonstrates the migration pattern described."""
@@ -279,8 +232,8 @@ Given a PR title and description, create a minimal example that demonstrates the
             user_prompt = f"""
 Create a minimal example that demonstrates the migration pattern described in this PR:
 
-Title: {pr_details["title"]}
-Description: {pr_details["body"]}
+Title: {pr_details.title}
+Description: {pr_details.body}
 
 Create two code blocks labeled BEFORE and AFTER that show the migration pattern.
 The examples should be minimal but clearly demonstrate the key changes involved in this migration.
@@ -325,7 +278,7 @@ async def save_examples(
 
 
 async def generate_verify_script(
-    pr_details: dict, project_dir: Path, file_extension: str
+    pr_details: PRDetails, project_dir: Path, file_extension: str
 ) -> str:
     """Generate a verification script based on PR details.
 
@@ -346,10 +299,10 @@ that can verify if a file has been properly migrated according to the pattern.""
     user_prompt = f"""
 I need to create a verification script for a code migration task. Here are the details:
 
-Pull Request Title: {pr_details["title"]}
-Pull Request Description: {pr_details["body"]}
+Pull Request Title: {pr_details.title}
+Pull Request Description: {pr_details.body}
 
-Files Changed: {len(pr_details["files"])}
+Files Changed: {len(pr_details.files)}
 File Extension: {file_extension}
 
 Create a Python script that:
@@ -401,7 +354,7 @@ async def setup_project_from_pr(
         pr_details = await get_pr_details(pr_url)
 
         print("Generating system prompt...")
-        system_prompt = await generate_system_prompt(pr_details, description)
+        system_prompt = await generate_system_prompt(description, pr_details)
         system_prompt_file = project_dir / "system_prompt.md"
         system_prompt_file.write_text(system_prompt)
         print(f"Saved system prompt to {system_prompt_file}")
