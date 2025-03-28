@@ -77,11 +77,13 @@ class OpenAIClient:
         response, _ = await self.generate_completion(messages, temperature=temperature)
         return response["choices"][0]["message"]["content"]
 
-    def count_tokens(self, text: str | list[dict[str, Any]]) -> int:
-        if isinstance(text, str):
+    def count_tokens(self, text: str | list[dict[str, Any]] | None) -> int:
+        if not text:
+            return 0
+        elif isinstance(text, str):
             return len(tiktoken.encoding_for_model(GPT_VERSION).encode(text))
         elif isinstance(text, list):
-            return sum(self.count_tokens(item.get("content") or "") for item in text)
+            return sum(self.count_tokens(item.get("content")) for item in text)
         else:
             raise ValueError(f"Unsupported text type: {type(text)}")
 
