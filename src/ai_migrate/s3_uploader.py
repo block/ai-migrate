@@ -30,10 +30,12 @@ class S3Uploader:
                     logger.error(f"Failed to save {path.name}: {e}")
             return
 
+        semaphore = asyncio.Semaphore(5)
+
         async def upload_one(path: Path):
             key = str(dest / path.name)
             try:
-                async with asyncio.Semaphore(5):
+                async with semaphore:
                     await asyncio.to_thread(
                         self.s3_client.put_object,
                         Bucket=self.bucket,

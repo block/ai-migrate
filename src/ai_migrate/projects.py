@@ -202,15 +202,13 @@ async def run(
         from .s3_uploader import S3Uploader
 
         uploader = S3Uploader(s3_bucket)
-        asyncio.create_task(
-            uploader.upload_results(
-                project=Path(project_dir).name,
-                results=results,
-                results_file=Path(results_file),
-                timestamp=timestamp,
-            )
+        print("Results upload started")
+        await uploader.upload_results(
+            project=Path(project_dir).name,
+            results=results,
+            results_file=Path(results_file),
+            timestamp=timestamp,
         )
-        print("Results upload started in background")
 
     return results
 
