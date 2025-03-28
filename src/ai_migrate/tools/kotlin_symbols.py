@@ -74,7 +74,7 @@ def find_symbol_definition(file_path: str, symbol_name: str) -> str | None:
     return None
 
 
-def get_symbol_definition(symbol: str, package: str) -> str | None:
+def get_symbol_definition(symbol: str, package: str) -> str:
     """
     Get the definition of a symbol from the source code needed to complete the migration
 
@@ -94,7 +94,7 @@ def get_symbol_definition(symbol: str, package: str) -> str | None:
         definition = find_symbol_definition(file_path, symbol)
         if definition:
             return definition
-    return None
+    return "Symbol not found"
 
 
 def scan_repository(root_dir: str | None = None) -> dict[str, str]:

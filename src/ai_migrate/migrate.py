@@ -223,7 +223,7 @@ async def handle_tool_calls(
                 tool_results.append(
                     {
                         "tool_call_id": tool_call["id"],
-                        "output": result.content,
+                        "output": str(result.content),
                     }
                 )
             except Exception as e:

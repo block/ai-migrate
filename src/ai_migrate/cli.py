@@ -623,7 +623,9 @@ def init(interactive):
         evals_dir.mkdir(exist_ok=True)
 
         system_prompt = project_path / SYSTEM_PROMPT_FILE
-        system_prompt.write_text("This is a placeholder. Tell the AI about your migration here.")
+        system_prompt.write_text(
+            "This is a placeholder. Tell the AI about your migration here."
+        )
 
         show_success_message(f"Project initialized successfully at {project_path}")
 

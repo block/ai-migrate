@@ -13,9 +13,7 @@ from ai_migrate.manifest import Manifest
 
 SCRIPT_DIR = Path(__file__).parent.parent.absolute()
 AI_MIGRATE_PROJECT_DIR = SCRIPT_DIR.parent
-EVALS_DIR = SCRIPT_DIR / "source"
 
-# Configure logging
 logging.basicConfig(
     level=logging.INFO,
     format="%(asctime)s - %(levelname)s - %(message)s",
@@ -93,7 +91,7 @@ class Workspace:
 
 
 def run_project_eval(project, verbose=False):
-    migrate_cmd = f"uv run --project {AI_MIGRATE_PROJECT_DIR} ai-migrate"
+    migrate_cmd = f"{sys.executable} -m ai_migrate.cli"
     with Workspace(verbose=verbose) as ws:
         logger.info(f"Running project eval for '{project}' in workspace {ws.temp_dir}")
         if verbose:
