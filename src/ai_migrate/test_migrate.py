@@ -22,21 +22,17 @@ def test_read_file_pairs_from(examples_dir):
     # Convert iterator to list for testing
     examples = list(read_file_pairs_from(examples_dir))
 
-    # Sort examples by name for consistent testing
     examples.sort(key=lambda x: x.name if x.name else "")
 
     # We expect 2 examples: one directory pair and one file pair
     assert len(examples) == 2
 
-    # Test directory pair example
     dir_example = examples[0]
     assert dir_example.name == "example1"
 
-    # Sort files by name for consistent testing
     dir_example.old_files.sort(key=lambda x: x.name)
     dir_example.new_files.sort(key=lambda x: x.name)
 
-    # Check old files
     assert len(dir_example.old_files) == 2
     assert dir_example.old_files[0].name == "src/file1.py"
     assert dir_example.old_files[1].name == "src/file2.py"
@@ -52,7 +48,6 @@ def test_read_file_pairs_from(examples_dir):
         return "old implementation"\n"""
     )
 
-    # Check new files
     assert len(dir_example.new_files) == 2
     assert dir_example.new_files[0].name == "src/file1.py"
     assert dir_example.new_files[1].name == "src/file2.py"
@@ -68,11 +63,9 @@ def test_read_file_pairs_from(examples_dir):
         return "new implementation"\n"""
     )
 
-    # Test single file pair example
     file_example = examples[1]
     assert file_example.name == "single"
 
-    # Check old file
     assert len(file_example.old_files) == 1
     assert file_example.old_files[0].name == "single.py"
     assert (
@@ -81,7 +74,6 @@ def test_read_file_pairs_from(examples_dir):
     return "old standalone function"\n"""
     )
 
-    # Check new file
     assert len(file_example.new_files) == 1
     assert file_example.new_files[0].name == "single.py"
     assert (

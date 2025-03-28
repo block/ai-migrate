@@ -186,13 +186,10 @@ def run_async_with_progress(description: str, func: Callable, *args, **kwargs) -
 
 
 def show_success_message(message: str):
-    """Show a success message."""
     console.print(f"[green]✓[/green] {message}")
 
 
 def show_error_message(message: str, error=None):
-    """Show an error message."""
-
     safe_message = message.replace("[", "\\[").replace("]", "\\]")
     console.print(f"[red]✗[/red] {safe_message}")
     if error:
@@ -201,12 +198,10 @@ def show_error_message(message: str, error=None):
 
 
 def show_warning_message(message: str):
-    """Show a warning message."""
     console.print(f"[yellow]Warning:[/yellow] {message}")
 
 
 def manage_examples(project_dir: Path):
-    """Manage example files."""
     examples_dir = project_dir / "examples"
     if not examples_dir.exists():
         show_error_message(f"Examples directory {examples_dir} does not exist.")
@@ -338,7 +333,6 @@ def manage_examples(project_dir: Path):
 
 
 def manage_evals(project_dir: Path):
-    """Manage evaluation test cases."""
     evals_dir = project_dir / "evals"
     if not evals_dir.exists():
         evals_dir.mkdir(exist_ok=True)

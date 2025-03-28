@@ -1,5 +1,5 @@
 from abc import ABC, abstractmethod
-from typing import Any, Dict, List, Optional, Tuple, Union
+from typing import Any
 
 
 class BaseLLMClient(ABC):
@@ -8,12 +8,12 @@ class BaseLLMClient(ABC):
     @abstractmethod
     async def generate_completion(
         self,
-        messages: List[Dict[str, str]],
-        tools: Optional[List[Dict[str, Any]]] = None,
+        messages: list[dict[str, str]],
+        tools: list[dict[str, Any]] | None = None,
         temperature: float = 0.1,
         max_tokens: int = 8192,
-        model: Optional[str] = None,
-    ) -> Tuple[Dict[str, Any], List[Dict[str, Any]]]:
+        model: str | None = None,
+    ) -> tuple[dict[str, Any], list[dict[str, Any]]]:
         """Generate a completion from the LLM.
 
         Args:
@@ -48,15 +48,7 @@ class BaseLLMClient(ABC):
         pass
 
     @abstractmethod
-    def count_tokens(self, text_or_messages: Union[str, List[Dict[str, Any]]]) -> int:
-        """Count tokens in a message list or string.
-
-        Args:
-            text_or_messages: Either a list of messages or a string
-
-        Returns:
-            The token count
-        """
+    def count_tokens(self, text_or_messages: str | list[dict[str, Any]]) -> int:
         pass
 
     @abstractmethod
