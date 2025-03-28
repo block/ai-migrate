@@ -39,7 +39,6 @@ from .pr_utils import (
     generate_system_prompt,
 )
 from .manifest import SYSTEM_PROMPT_FILE, Manifest
-from .migrate import SYSTEM_MESSAGE
 from .eval_generator import generate_eval_from_pr
 from ai_migrate.llm_providers import DefaultClient
 from .examples import setup as setup_examples, setup_from_pr
@@ -624,7 +623,7 @@ def init(interactive):
         evals_dir.mkdir(exist_ok=True)
 
         system_prompt = project_path / SYSTEM_PROMPT_FILE
-        system_prompt.write_text(SYSTEM_MESSAGE)
+        system_prompt.write_text("This is a placeholder. Tell the AI about your migration here.")
 
         show_success_message(f"Project initialized successfully at {project_path}")
 
