@@ -243,7 +243,7 @@ async def handle_tool_calls(
     return tool_results
 
 
-def assemble_messages(
+def combine_examples_into_conversation(
     examples: list[MigrationExample],
     target: MigrationExample,
     system_prompt: str,
@@ -558,7 +558,7 @@ async def _run(
 
     target = MigrationExample(name=None, old_files=target_file_contents, new_files=[])
 
-    messages = assemble_messages(examples, target, system_prompt)
+    messages = combine_examples_into_conversation(examples, target, system_prompt)
     all_files_to_verify = set()
 
     iteration_messages = []
@@ -594,7 +594,7 @@ async def _run(
         while 0 < client.max_context_tokens() < client.count_tokens(messages):
             log(f"Trimming iteration messages: {len(iteration_messages)}")
             # Fall back to 3 examples + trim iterations 1 at a time.
-            messages = assemble_messages(examples[:3], target, system_prompt)
+            messages = combine_examples_into_conversation(examples[:3], target, system_prompt)
             iteration_messages = iteration_messages[1:]
             messages = build_messages(messages, iteration_messages)
 
