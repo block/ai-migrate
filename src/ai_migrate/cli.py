@@ -39,7 +39,6 @@ from .pr_utils import (
     generate_system_prompt,
 )
 from .manifest import SYSTEM_PROMPT_FILE, Manifest
-from .migrate import SYSTEM_MESSAGE
 from .eval_generator import generate_eval_from_pr
 from ai_migrate.llm_providers import DefaultClient
 from .examples import setup as setup_examples, setup_from_pr
@@ -618,7 +617,9 @@ def init(interactive):
         evals_dir.mkdir(exist_ok=True)
 
         system_prompt = project_path / SYSTEM_PROMPT_FILE
-        system_prompt.write_text(SYSTEM_MESSAGE)
+        system_prompt.write_text(
+            "This is a placeholder. Tell the AI about your migration here."
+        )
 
         show_success_message(f"Project initialized successfully at {project_path}")
 
@@ -809,7 +810,9 @@ def status(
 
     from .projects import status as projects_status
 
-    result, error = run_with_progress("Getting migration status...", projects_status)
+    result, error = run_with_progress(
+        "Getting migration status...", projects_status, manifest
+    )
 
     if error:
         show_error_message("Failed to get migration status", error)
@@ -944,6 +947,13 @@ def script(script, project_dir):
 def current_project(project_dir):
     """Show the project directory."""
     console.print(f"Project directory: [bold cyan]{project_dir}[/bold cyan]")
+    from .projects import load_tools_from_dir
+
+    tools = load_tools_from_dir(project_dir)
+    console.print("Tools:")
+    if tools:
+        for tool in tools:
+            console.print(f"  {tool.name}: {tool.description}")
 
 
 def main():

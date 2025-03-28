@@ -3,6 +3,8 @@ import os
 import re
 import subprocess
 
+from pydantic_ai import Tool
+
 REPOSITORY_TREE = None
 
 
@@ -72,7 +74,14 @@ def find_symbol_definition(file_path: str, symbol_name: str) -> str | None:
     return None
 
 
-def get_symbol_definition(symbol: str, package: str) -> str | None:
+def get_symbol_definition(symbol: str, package: str) -> str:
+    """
+    Get the definition of a symbol from the source code needed to complete the migration
+
+    Args:
+        symbol: The symbol name to look up (function, constant, etc)
+        package: The import statement to add to the source code to get to this symbol
+    """
     global REPOSITORY_TREE
     if REPOSITORY_TREE is None:
         REPOSITORY_TREE = scan_repository()
@@ -85,7 +94,7 @@ def get_symbol_definition(symbol: str, package: str) -> str | None:
         definition = find_symbol_definition(file_path, symbol)
         if definition:
             return definition
-    return None
+    return "Symbol not found"
 
 
 def scan_repository(root_dir: str | None = None) -> dict[str, str]:
@@ -118,6 +127,9 @@ def scan_repository(root_dir: str | None = None) -> dict[str, str]:
     with open(cache_path, "w") as f:
         json.dump(symbol_tree, f, indent=2)
     return symbol_tree
+
+
+symbol_lookup_tool = Tool(get_symbol_definition)
 
 
 if __name__ == "__main__":

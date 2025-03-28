@@ -1,5 +1,5 @@
 import pytest
-from ai_migrate.resolve_symbols import contains_definition
+from ai_migrate.tools.kotlin_symbols import contains_definition
 
 
 @pytest.mark.parametrize(
