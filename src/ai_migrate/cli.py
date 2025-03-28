@@ -36,12 +36,11 @@ from .pr_utils import (
     get_pr_details,
     extract_example_patterns,
     save_examples,
-    generate_system_prompt,
 )
+from .utils import generate_system_prompt
 from .manifest import SYSTEM_PROMPT_FILE, Manifest
 from .migrate import SYSTEM_MESSAGE
 from .eval_generator import generate_eval_from_pr
-from ai_migrate.llm_providers import DefaultClient
 from .examples import setup as setup_examples, setup_from_pr
 
 IS_INTERACTIVE = sys.stdin.isatty()
@@ -456,14 +455,13 @@ def manage_system_prompt(project_dir: Path):
 
         if not method:
             return
-
+        description = get_migration_description()
         if method == "pr":
             pr_number = prompt("Enter PR link: ")
-            description = prompt("Enter a brief description of the migration task: ")
 
             async def generate_prompt():
                 pr_details = await get_pr_details(pr_number)
-                return await generate_system_prompt(pr_details, description)
+                return await generate_system_prompt(description, pr_details)
 
             system_prompt, error = run_async_with_progress(
                 "Generating system prompt...", generate_prompt
@@ -474,30 +472,9 @@ def manage_system_prompt(project_dir: Path):
                 return
 
         elif method == "description":
-            description = prompt("Enter a detailed description of the migration task: ")
 
             async def generate_prompt():
-                client = DefaultClient()
-                system_prompt_for_generation = """You are an expert at creating system prompts for code migration tasks.
-Create a clear, concise system prompt that will guide an AI to perform code migrations based on the description provided."""
-
-                user_prompt = f"""
-I need to create a system prompt for a code migration task. Here's the description:
-
-{description}
-
-Create a system prompt that clearly explains:
-1. The migration goal
-2. Key patterns to look for
-3. How to transform the code
-4. Any important constraints or considerations
-
-The system prompt should be concise but comprehensive, focusing on the migration patterns.
-"""
-
-                return await client.generate_text(
-                    system_prompt_for_generation, user_prompt
-                )
+                return await generate_system_prompt(description)
 
             system_prompt, error = run_async_with_progress(
                 "Generating system prompt...", generate_prompt
@@ -568,7 +545,7 @@ def init(interactive):
 
     if use_pr:
         pr_number = prompt("Enter PR link: ")
-        description = prompt("Enter a brief description of the migration task: ")
+        description = get_migration_description()
         file_extension = prompt(
             "Enter file extension for examples (default: java): ", default="java"
         )
@@ -617,16 +594,44 @@ def init(interactive):
         evals_dir = project_path / "evals"
         evals_dir.mkdir(exist_ok=True)
 
-        system_prompt = project_path / SYSTEM_PROMPT_FILE
-        system_prompt.write_text(SYSTEM_MESSAGE)
+        description = get_migration_description()
+
+        result, error = run_async_with_progress(
+            "Generating system prompt...",
+            generate_system_prompt,
+            description,
+        )
+
+        if error:
+            show_error_message("Error generating system prompt", error)
+            show_warning_message(
+                "Creating minimal system prompt. You may want to edit it manually."
+            )
+            system_prompt = f"{SYSTEM_MESSAGE}\n\n# Migration Task\n\n{description}"
+        else:
+            system_prompt = result
+
+        system_prompt_path = project_path / SYSTEM_PROMPT_FILE
+        system_prompt_path.write_text(system_prompt)
 
         show_success_message(f"Project initialized successfully at {project_path}")
 
+        console.print("\nGenerated System Prompt:")
+        console.print(
+            Panel(Markdown(system_prompt), title="System Prompt", border_style="blue")
+        )
+
     console.print("\nNext steps:")
-    console.print("1. Review the generated system prompt")
-    console.print("2. Review the generated examples")
+    console.print("1. Add example files using: ai-migrate migrate --manage examples")
+    console.print("2. Review and refine the system prompt if needed")
     console.print(
         f"\nTo set this as your default project: [bold]export AI_MIGRATE_PROJECT_DIR={project_path}[/bold]"
+    )
+
+
+def get_migration_description() -> str:
+    return prompt(
+        "Enter a description of the migration task (what needs to be changed and how): "
     )
 
 
