@@ -102,10 +102,12 @@ def run_project_eval(project, verbose=False):
         start_time = time.time()
         project_dir = ws.temp_dir / "migrate-project"
 
-        logger.info(
-            f"Copying project files from {AI_MIGRATE_PROJECT_DIR / 'projects' / project} to {project_dir}"
-        )
-        shutil.copytree(AI_MIGRATE_PROJECT_DIR / "projects" / project, project_dir)
+        source_project_dir = Path(project)
+        if not source_project_dir.exists() or not source_project_dir.is_dir():
+            source_project_dir = AI_MIGRATE_PROJECT_DIR / "projects" / project
+
+        logger.info(f"Copying project files from {source_project_dir} to {project_dir}")
+        shutil.copytree(source_project_dir, project_dir)
 
         eval_count = 0
         pass_count = 0

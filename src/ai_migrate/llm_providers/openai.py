@@ -1,9 +1,21 @@
 import tiktoken
-from typing import Any, Dict, List, Optional, Tuple, Union
+from typing import Any, Dict, List, Union
 
 from openai import AsyncOpenAI
+from pydantic_ai.tools import ToolDefinition
 
 GPT_VERSION = "gpt-4o"
+
+
+def _tool(tool: ToolDefinition) -> dict:
+    return {
+        "type": "function",
+        "function": {
+            "name": tool.name,
+            "description": tool.description,
+            "parameters": tool.parameters_json_schema,
+        },
+    }
 
 
 class OpenAIClient:
@@ -14,11 +26,11 @@ class OpenAIClient:
 
     async def generate_completion(
         self,
-        messages: List[Dict[str, str]],
-        tools: Optional[List[Dict[str, Any]]] = None,
+        messages: list[dict[str, str]],
+        tools: list[ToolDefinition] | None = None,
         temperature: float = 0.1,
         max_tokens: int = 8192,
-    ) -> Tuple[Dict[str, Any], List[Dict[str, Any]]]:
+    ) -> tuple[dict[str, Any], list[dict[str, Any]]]:
         """Generate a completion
 
         Args:
@@ -34,7 +46,7 @@ class OpenAIClient:
             model="gpt-4o",
             messages=messages,
             temperature=temperature,
-            tools=tools,
+            tools=[_tool(t) for t in tools or []],
             max_tokens=max_tokens,
         )
         response = response.model_dump()
@@ -70,7 +82,7 @@ class OpenAIClient:
         if isinstance(text, str):
             return len(tiktoken.encoding_for_model(GPT_VERSION).encode(text))
         elif isinstance(text, list):
-            return sum(self.count_tokens(item["content"]) for item in text)
+            return sum(self.count_tokens(item.get("content") or "") for item in text)
         else:
             raise ValueError(f"Unsupported text type: {type(text)}")
 

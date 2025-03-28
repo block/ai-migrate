@@ -815,7 +815,9 @@ def status(
 
     from .projects import status as projects_status
 
-    result, error = run_with_progress("Getting migration status...", projects_status)
+    result, error = run_with_progress(
+        "Getting migration status...", projects_status, manifest
+    )
 
     if error:
         show_error_message("Failed to get migration status", error)
@@ -950,6 +952,13 @@ def script(script, project_dir):
 def current_project(project_dir):
     """Show the project directory."""
     console.print(f"Project directory: [bold cyan]{project_dir}[/bold cyan]")
+    from .projects import load_tools_from_dir
+
+    tools = load_tools_from_dir(project_dir)
+    console.print("Tools:")
+    if tools:
+        for tool in tools:
+            console.print(f"  {tool.name}: {tool.description}")
 
 
 def main():
