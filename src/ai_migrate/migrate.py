@@ -572,6 +572,7 @@ async def _run(
         target_basename = (
             target_basename.replace("-", " ").replace("_", " ").title().replace(" ", "")
         )
+        target_basename = target_basename + "AI"
 
     # Create target MigrationExample
     target_file_contents = []
