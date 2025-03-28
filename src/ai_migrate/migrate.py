@@ -598,7 +598,7 @@ async def _run(
             iteration_messages = iteration_messages[1:]
             messages = build_messages(messages, iteration_messages)
 
-        response, messages = await call_llm(client, messages, tools)
+        response, messages = await call_llm(client, messages, tools or [])
 
         response_text = response["choices"][0]["message"]["content"]
         parsed_result = extract_code_blocks(response_text)
