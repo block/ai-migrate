@@ -69,6 +69,7 @@ async def run(
     resume: bool = True,
     llm_fakes=None,
     dont_create_evals: bool = False,
+    s3_bucket: str | None = None,
 ) -> list[FileGroup]:
     """Run an AI migration project."""
     if manifest_file:
@@ -179,14 +180,14 @@ async def run(
             for fn in file.files:
                 print(fn)
 
-    ts = datetime.now().strftime("%Y%m%d-%H%M%S")
-    results_file = f"manifest-{ts}.json"
+    timestamp = datetime.now()
+    results_file = f"manifest-{timestamp.strftime('%Y%m%d-%H%M%S')}.json"
     with open(results_file, "w") as f:
         result_manifest = manifest.model_copy(
             update={
                 "files": results,
                 "eval_target_repo_ref": target_sha,
-                "time": datetime.now(),
+                "time": timestamp,
             }
         )
         f.write(
@@ -196,6 +197,19 @@ async def run(
         )
 
     print(f"Results saved to {results_file}")
+
+    if s3_bucket:
+        from .s3_uploader import S3Uploader
+
+        uploader = S3Uploader(s3_bucket)
+        print("Results upload started")
+        await uploader.upload_results(
+            project=Path(project_dir).name,
+            results=results,
+            results_file=Path(results_file),
+            timestamp=timestamp,
+        )
+
     return results
 
 
