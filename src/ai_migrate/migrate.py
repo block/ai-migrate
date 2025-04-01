@@ -539,6 +539,25 @@ async def _run(
     if not examples:
         raise FileNotFoundError("No valid example pairs found in examples directory")
 
+    from .example_selector import select_relevant_examples
+
+    log("[agent] Running example selection analysis...")
+    selection_result = await select_relevant_examples(target_files, examples, client)
+
+    log("\nExample Selection Analysis:")
+    log(selection_result.analysis)
+    log("\nSelected Examples:")
+    for example in selection_result.selected_examples:
+        reason = selection_result.selection_reasons.get(
+            example.name, "No specific reason provided"
+        )
+        log(f"- {example.name}: {reason}")
+    log("\nExcluded Examples:")
+    for name, reason in selection_result.exclusion_reasons.items():
+        log(f"- {name}: {reason}")
+
+    examples = selection_result.selected_examples
+
     system_prompt = Path(system_prompt).read_text()
 
     # TODO: Have some kind of configuration driven controls for how basename is transformed
@@ -547,7 +566,6 @@ async def _run(
             target_basename.replace("-", " ").replace("_", " ").title().replace(" ", "")
         )
 
-    # Create target MigrationExample
     target_file_contents = []
     for i, target_file in enumerate(target_files):
         full_path = Path(target_file).absolute()
