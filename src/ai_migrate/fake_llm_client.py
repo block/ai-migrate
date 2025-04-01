@@ -20,7 +20,7 @@ class FakeLLMClient:
         response = next(self.responses)
         if isinstance(response, dict):
             return response, messages
-        return {"choices": [{"message": {"content": response }}]}, messages
+        return {"choices": [{"message": {"content": response}}]}, messages
 
     def count_tokens(self, text: str | list[dict[str, Any]]) -> int:
         if isinstance(text, str):

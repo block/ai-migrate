@@ -6,6 +6,4 @@ def add(x: int, y: int) -> int:
     return x + y
 
 
-tools = [
-    Tool(add)
-]
+tools = [Tool(add)]
