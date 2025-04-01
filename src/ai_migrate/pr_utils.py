@@ -384,12 +384,11 @@ async def setup_project_from_pr(
         print(f"Project setup complete at {project_dir}")
     except Exception as e:
         print(f"Error during project setup: {e}")
-        from .migrate import SYSTEM_MESSAGE
         from .manifest import SYSTEM_PROMPT_FILE, VERIFY_SCRIPT_FILE
 
         system_prompt_file = project_dir / SYSTEM_PROMPT_FILE
         if not system_prompt_file.exists():
-            system_prompt = f"{SYSTEM_MESSAGE}\n\n# Migration Task\n\n{description}"
+            system_prompt = f"# Migration Task\n\n{description}"
             system_prompt_file.write_text(system_prompt)
             print(f"Created minimal system prompt at {system_prompt_file}")
 

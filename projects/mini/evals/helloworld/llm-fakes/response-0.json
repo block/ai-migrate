@@ -1,0 +1,20 @@
+{
+  "choices": [
+    {
+      "message": {
+        "tool_calls": [
+          {
+            "id": 0,
+            "function": {
+              "name": "add",
+              "arguments": {
+                "x": 1,
+                "y": 2
+              }
+            }
+          }
+        ]
+      }
+    }
+  ]
+}

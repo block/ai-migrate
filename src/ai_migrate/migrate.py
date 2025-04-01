@@ -4,63 +4,23 @@ import os
 import shutil
 import sys
 import tempfile
+import traceback
 from dataclasses import dataclass
 from pathlib import Path
 import subprocess
-import json
 from typing import Any, Iterable, Optional
+
+from pydantic_ai.messages import ToolCallPart
+from pydantic_ai.tools import Tool
+from pydantic_ai import RunContext
 
 from ai_migrate.llm_providers import DefaultClient
 from .fake_llm_client import FakeLLMClient
 from .git_identity import environment_variables
 from .manifest import FileGroup, FileEntry, Manifest
-from .resolve_symbols import get_symbol_definition
 from .eval_generator import generate_eval_from_migration
 
-FN_LOOKUP_SYMBOL = "lookup_symbol_definition"
 
-LOOKUP_SYMBOL_PROMPT = (
-    "Do not include any explanations or comments outside the code block.\n"
-    "Do not assume functionality of classes or functions that you haven't seen in the examples. "
-    f"Instead use the provided tool '{FN_LOOKUP_SYMBOL}' to look up the definition of a symbol.\n"
-    "You want to produce code that you can guarantee to compile, so use this tool whenever you are unsure."
-)
-
-if os.environ.get("AI_MIGRATE_DISABLE_TOOLS", "").lower() in ("true", "1", "yes"):
-    LOOKUP_SYMBOL_PROMPT = ""
-
-SYSTEM_MESSAGE = (
-    "You are an expert at migrating source code to modern standards. "
-    "For each example pair you see, understand the patterns of modernization applied. "
-    "Then apply similar modernization patterns to the target code while preserving its functionality. "
-    "Provide only the migrated code between triple backticks (```). "
-    f"{LOOKUP_SYMBOL_PROMPT}"
-)
-
-
-TOOL_DEFINITIONS = [
-    {
-        "type": "function",
-        "function": {
-            "name": FN_LOOKUP_SYMBOL,
-            "description": "Get the definition of a symbol from the source code needed to complete the migration",
-            "parameters": {
-                "type": "object",
-                "properties": {
-                    "symbol": {
-                        "type": "string",
-                        "description": "The symbol name to look up (function, constant, etc)",
-                    },
-                    "import": {
-                        "type": "string",
-                        "description": "The import statement to add to the source code to get to this symbol",
-                    },
-                },
-                "required": ["symbol", "import"],
-            },
-        },
-    }
-]
 ROLE_ASSISTANT = "assistant"
 ROLE_USER = "user"
 
@@ -69,6 +29,9 @@ LOG_STREAM = contextvars.ContextVar("LOG_STREAM", default=sys.stdout)
 
 def log(*args, **kwargs):
     print(*args, **kwargs, file=LOG_STREAM.get(), flush=True)
+
+
+NoneContext = RunContext[None]
 
 
 @dataclass
@@ -237,29 +200,39 @@ def migrate_prompt(example: MigrationExample) -> list[dict]:
     return [user_message]
 
 
-def handle_tool_calls(tool_calls: list[dict[str, Any]]) -> list[dict[str, str]]:
+async def handle_tool_calls(
+    tools: list[Tool], tool_calls: list[dict[str, Any]]
+) -> list[dict[str, str]]:
     tool_results = []
+    tools_by_name = {tool.name: tool for tool in tools}
     for tool_call in tool_calls:
+        tool_call_message = ToolCallPart(
+            tool_call["function"]["name"], tool_call["function"]["arguments"]
+        )
         function = tool_call["function"]
-        if function["name"] == FN_LOOKUP_SYMBOL:
+        if tool := tools_by_name.get(function["name"]):
             try:
-                args = json.loads(function["arguments"])
-                symbol = args["symbol"]
-                package = args["import"]
-                definition = (
-                    get_symbol_definition(symbol, package)
-                    or "Symbol not found. It might not be available in this repository."
+                log("[agent] Running tool", tool.name, f"{tool_call_message=}")
+                result = await tool._run(
+                    tool_call_message,
+                    NoneContext(
+                        deps=None,
+                        model=None,
+                        usage=None,
+                        prompt="",
+                    ),
                 )
-                log(f"Looking up symbol: {symbol}")
-                log(">>", definition)
-
+                log("[agent] Tool result", result)
                 tool_results.append(
                     {
                         "tool_call_id": tool_call["id"],
-                        "output": definition,
+                        "output": str(result.content),
                     }
                 )
             except Exception as e:
+                log(
+                    "[agent] Error processing tool call", str(e), traceback.format_exc()
+                )
                 tool_results.append(
                     {
                         "tool_call_id": tool_call["id"],
@@ -276,11 +249,11 @@ def handle_tool_calls(tool_calls: list[dict[str, Any]]) -> list[dict[str, str]]:
     return tool_results
 
 
-def messages_and_tools(
+def combine_examples_into_conversation(
     examples: list[MigrationExample],
     target: MigrationExample,
     system_prompt: str,
-) -> tuple[list, list]:
+) -> list[dict]:
     messages = [{"role": "system", "content": system_prompt}]
 
     for example in examples:
@@ -288,15 +261,11 @@ def messages_and_tools(
 
     messages.extend(migrate_prompt(target))
 
-    # Check if tool calling should be disabled
-    if os.environ.get("AI_MIGRATE_DISABLE_TOOLS", "").lower() in ("true", "1", "yes"):
-        return messages, []
-    else:
-        return messages, TOOL_DEFINITIONS
+    return messages
 
 
 async def call_llm(
-    client: DefaultClient, messages: list, tools: list, temperature=0.1
+    client: DefaultClient, messages: list, tools: list[Tool], temperature=0.1
 ) -> tuple[dict, list[dict]]:
     """Call LLM for completions
 
@@ -304,7 +273,9 @@ async def call_llm(
     """
     while True:
         response, messages = await client.generate_completion(
-            messages=messages, tools=tools, temperature=temperature
+            messages=messages,
+            tools=[await tool.prepare_tool_def(None) for tool in tools],
+            temperature=temperature,
         )
 
         assistant_message = response["choices"][0]["message"]
@@ -312,7 +283,7 @@ async def call_llm(
         if not (tool_calls := assistant_message.get("tool_calls")):
             return response, messages
 
-        tool_results = handle_tool_calls(tool_calls)
+        tool_results = await handle_tool_calls(tools, tool_calls)
 
         messages.append(assistant_message)
         for result in tool_results:
@@ -375,6 +346,7 @@ async def run(
     target_dir: str = "",
     target_basename: str = "",
     dont_create_evals: bool = False,
+    tools: list[Tool] = None,
 ):
     """Run the migration process on the target files.
     Args:
@@ -479,6 +451,7 @@ async def run(
         target_dir=target_dir,
         target_dir_rel_path=target_dir_rel_path,
         target_basename=target_basename,
+        tools=tools,
     )
 
 
@@ -542,17 +515,18 @@ def build_messages(
 
 
 async def _run(
-    target_files,
-    system_prompt,
-    examples_dir,
-    verify_cmd,
-    pre_verify_cmd,
-    worktree_root,
-    llm_fakes,
-    dont_create_evals=False,
-    target_dir=None,
-    target_dir_rel_path=None,
-    target_basename=None,
+    target_files: list[str],
+    system_prompt: str,
+    examples_dir: str,
+    verify_cmd: str,
+    pre_verify_cmd: str,
+    worktree_root: str | Path,
+    llm_fakes: str | None,
+    dont_create_evals: bool = False,
+    target_dir: Path | str | None = None,
+    target_dir_rel_path: Path | str | None = None,
+    target_basename: str = None,
+    tools: list[Tool] = None,
 ):
     if llm_fakes:
         client = FakeLLMClient(llm_fakes)
@@ -590,7 +564,7 @@ async def _run(
 
     target = MigrationExample(name=None, old_files=target_file_contents, new_files=[])
 
-    messages, tools = messages_and_tools(examples, target, system_prompt)
+    messages = combine_examples_into_conversation(examples, target, system_prompt)
     all_files_to_verify = set()
 
     iteration_messages = []
@@ -626,11 +600,13 @@ async def _run(
         while 0 < client.max_context_tokens() < client.count_tokens(messages):
             log(f"Trimming iteration messages: {len(iteration_messages)}")
             # Fall back to 3 examples + trim iterations 1 at a time.
-            messages, _ = messages_and_tools(examples[:3], target, system_prompt)
+            messages = combine_examples_into_conversation(
+                examples[:3], target, system_prompt
+            )
             iteration_messages = iteration_messages[1:]
             messages = build_messages(messages, iteration_messages)
 
-        response, messages = await call_llm(client, messages, tools)
+        response, messages = await call_llm(client, messages, tools or [])
 
         response_text = response["choices"][0]["message"]["content"]
         parsed_result = extract_code_blocks(response_text)
@@ -786,24 +762,20 @@ async def _run(
         for line in verification_output.splitlines():
             log(f"[verify] {line}")
 
-        lookup_symbol_prompt = (
-            f"Use the {FN_LOOKUP_SYMBOL} tool to find the definition of any symbols related to this problem. "
-            "Then apply the necessary changes to the code. Don't guess or assume functionality."
-            "From now on, only re-write files, don't rename them."
-        )
-        if os.environ.get("AI_MIGRATE_DISABLE_TOOLS", "").lower() in (
-            "true",
-            "1",
-            "yes",
-        ):
-            lookup_symbol_prompt = ""
+        tool_call_extra = ""
+        if tools:
+            tool_call_extra = (
+                f"Use the provided tools to help: {', '.join(tool.name for tool in tools)}"
+                "Then apply the necessary changes to the code. Don't guess or assume functionality."
+                "From now on, only re-write files, don't rename them."
+            )
 
         iteration_message.append({"role": ROLE_ASSISTANT, "content": response_text})
         iteration_message.append(
             {
                 "role": ROLE_USER,
                 "content": f"The code did not compile. The error was: {verification_output}. "
-                f"{lookup_symbol_prompt}",
+                f"{tool_call_extra}",
             }
         )
         iteration_messages.append(iteration_message)

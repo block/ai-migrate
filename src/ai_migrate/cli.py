@@ -39,7 +39,6 @@ from .pr_utils import (
 )
 from .utils import generate_system_prompt
 from .manifest import SYSTEM_PROMPT_FILE, Manifest
-from .migrate import SYSTEM_MESSAGE
 from .eval_generator import generate_eval_from_pr
 from .examples import setup as setup_examples, setup_from_pr
 
@@ -605,9 +604,9 @@ def init(interactive):
         if error:
             show_error_message("Error generating system prompt", error)
             show_warning_message(
-                "Creating minimal system prompt. You may want to edit it manually."
+                "Adding a placeholder. Please edit the system prompt manually."
             )
-            system_prompt = f"{SYSTEM_MESSAGE}\n\n# Migration Task\n\n{description}"
+            system_prompt = f"#Migration Task\n\n{description}"
         else:
             system_prompt = result
 
@@ -814,7 +813,9 @@ def status(
 
     from .projects import status as projects_status
 
-    result, error = run_with_progress("Getting migration status...", projects_status)
+    result, error = run_with_progress(
+        "Getting migration status...", projects_status, manifest
+    )
 
     if error:
         show_error_message("Failed to get migration status", error)
@@ -949,6 +950,13 @@ def script(script, project_dir):
 def current_project(project_dir):
     """Show the project directory."""
     console.print(f"Project directory: [bold cyan]{project_dir}[/bold cyan]")
+    from .projects import load_tools_from_dir
+
+    tools = load_tools_from_dir(project_dir)
+    console.print("Tools:")
+    if tools:
+        for tool in tools:
+            console.print(f"  {tool.name}: {tool.description}")
 
 
 def main():

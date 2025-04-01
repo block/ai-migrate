@@ -1,4 +1,5 @@
 import asyncio
+import importlib
 import re
 import subprocess
 import traceback
@@ -8,6 +9,8 @@ import sys
 from typing import Iterable
 
 from ai_migrate.git import get_branches
+from pydantic_ai.tools import Tool
+
 from .manifest import (
     FileEntry,
     Manifest,
@@ -58,6 +61,20 @@ def merge_manifests(manifest1: Manifest, manifest2: Manifest):
     return manifest1.model_copy(update={"files": list(entries.values())})
 
 
+def load_tools_from_dir(project_dir: str) -> list[Tool]:
+    tools_file = Path(project_dir) / "tools.py"
+    if tools_file.exists():
+        try:
+            sys.path.append(str(project_dir))
+            tools_module = importlib.import_module("tools")
+        finally:
+            sys.path.pop()
+
+        if hasattr(tools_module, "tools"):
+            return tools_module.tools
+    return []
+
+
 async def run(
     project_dir: str,
     logs_dir: str | Path,
@@ -103,6 +120,8 @@ async def run(
 
     status_manager = StatusManager()
 
+    tools = load_tools_from_dir(project_dir)
+
     async def process_one_fileset(index, files: FileGroup, task_name: str):
         nonlocal target_sha
         if target_sha is None:
@@ -131,6 +150,7 @@ async def run(
                 dont_create_evals=dont_create_evals,
                 target_dir=manifest.target_dir,
                 target_basename=files.base_name,
+                tools=tools,
             )
             new_result = "pass"
             await status_manager.mark_passed(task_name)

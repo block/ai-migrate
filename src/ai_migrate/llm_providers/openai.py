@@ -2,8 +2,20 @@ import tiktoken
 from typing import Any
 
 from openai import AsyncOpenAI
+from pydantic_ai.tools import ToolDefinition
 
 GPT_VERSION = "gpt-4o"
+
+
+def _tool(tool: ToolDefinition) -> dict:
+    return {
+        "type": "function",
+        "function": {
+            "name": tool.name,
+            "description": tool.description,
+            "parameters": tool.parameters_json_schema,
+        },
+    }
 
 
 class OpenAIClient:
@@ -15,7 +27,7 @@ class OpenAIClient:
     async def generate_completion(
         self,
         messages: list[dict[str, str]],
-        tools: list[dict[str, Any]] | None = None,
+        tools: list[ToolDefinition] | None = None,
         temperature: float = 0.1,
         max_tokens: int = 8192,
     ) -> tuple[dict[str, Any], list[dict[str, Any]]]:
@@ -34,7 +46,7 @@ class OpenAIClient:
             model="gpt-4o",
             messages=messages,
             temperature=temperature,
-            tools=tools,
+            tools=[_tool(t) for t in tools or []],
             max_tokens=max_tokens,
         )
         response = response.model_dump()
@@ -65,11 +77,13 @@ class OpenAIClient:
         response, _ = await self.generate_completion(messages, temperature=temperature)
         return response["choices"][0]["message"]["content"]
 
-    def count_tokens(self, text: str | list[dict[str, Any]]) -> int:
-        if isinstance(text, str):
+    def count_tokens(self, text: str | list[dict[str, Any]] | None) -> int:
+        if not text:
+            return 0
+        elif isinstance(text, str):
             return len(tiktoken.encoding_for_model(GPT_VERSION).encode(text))
         elif isinstance(text, list):
-            return sum(self.count_tokens(item["content"]) for item in text)
+            return sum(self.count_tokens(item.get("content")) for item in text)
         else:
             raise ValueError(f"Unsupported text type: {type(text)}")
 
