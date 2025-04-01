@@ -230,7 +230,9 @@ async def handle_tool_calls(
                     }
                 )
             except Exception as e:
-                log("[agent] Error processing tool call", str(e), traceback.format_exc())
+                log(
+                    "[agent] Error processing tool call", str(e), traceback.format_exc()
+                )
                 tool_results.append(
                     {
                         "tool_call_id": tool_call["id"],
