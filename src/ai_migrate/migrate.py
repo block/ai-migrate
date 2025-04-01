@@ -4,6 +4,7 @@ import os
 import shutil
 import sys
 import tempfile
+import traceback
 from dataclasses import dataclass
 from pathlib import Path
 import subprocess
@@ -211,7 +212,8 @@ async def handle_tool_calls(
         function = tool_call["function"]
         if tool := tools_by_name.get(function["name"]):
             try:
-                result = await tool.run(
+                log("[agent] Running tool", tool.name, f"{tool_call_message=}")
+                result = await tool._run(
                     tool_call_message,
                     NoneContext(
                         deps=None,
@@ -220,6 +222,7 @@ async def handle_tool_calls(
                         prompt="",
                     ),
                 )
+                log("[agent] Tool result", result)
                 tool_results.append(
                     {
                         "tool_call_id": tool_call["id"],
@@ -227,6 +230,7 @@ async def handle_tool_calls(
                     }
                 )
             except Exception as e:
+                log("[agent] Error processing tool call", str(e), traceback.format_exc())
                 tool_results.append(
                     {
                         "tool_call_id": tool_call["id"],
