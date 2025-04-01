@@ -4,7 +4,7 @@ import json
 from dataclasses import dataclass
 from typing import List
 from pathlib import Path
-from .migrate import DefaultClient, MigrationExample
+from .migrate import DefaultClient, MigrationExample, log
 
 EXAMPLE_SELECTION_PROMPT = """You are an expert at analyzing code migration patterns. Your task is to select the most relevant examples for migrating specific target files.
 
@@ -87,8 +87,34 @@ async def select_relevant_examples(
     ]
 
     response, _ = await client.generate_completion(messages=messages, temperature=0.1)
-    content = response["choices"][0]["message"]["content"]
 
+    log("[agent] Raw LLM response:", response)
+
+    try:
+        if "choices" in response and response["choices"]:
+            message = response["choices"][0].get("message", {})
+            if isinstance(message, dict):
+                content = message.get("content", "")
+            else:
+                content = str(message)
+        else:
+            content = str(response)
+
+        if not content.strip():
+            log("[agent] Warning: Empty content received from LLM")
+            content = json.dumps(
+                {
+                    "analysis": "No analysis provided - LLM returned empty response",
+                    "selected_examples": [],
+                    "excluded_examples": [],
+                }
+            )
+    except Exception as e:
+        raise ValueError(
+            f"Failed to extract content from LLM response: {e}\nResponse: {response}"
+        )
+
+    log("[agent] Parsed content:", content)
     from .utils import extract_code_blocks
 
     try:
