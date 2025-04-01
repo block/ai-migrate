@@ -1,10 +1,8 @@
-"""Example selection logic for optimizing migration context."""
-
 import json
 from dataclasses import dataclass
 from typing import List
 from pathlib import Path
-from .migrate import DefaultClient, MigrationExample, log
+from .migrate import DefaultClient, MigrationExample
 
 EXAMPLE_SELECTION_PROMPT = """You are an expert at analyzing code migration patterns. Your task is to select the most relevant examples for migrating specific target files.
 
@@ -88,8 +86,6 @@ async def select_relevant_examples(
 
     response, _ = await client.generate_completion(messages=messages, temperature=0.1)
 
-    log("[agent] Raw LLM response:", response)
-
     try:
         if "choices" in response and response["choices"]:
             message = response["choices"][0].get("message", {})
@@ -101,7 +97,6 @@ async def select_relevant_examples(
             content = str(response)
 
         if not content.strip():
-            log("[agent] Warning: Empty content received from LLM")
             content = json.dumps(
                 {
                     "analysis": "No analysis provided - LLM returned empty response",
@@ -113,8 +108,6 @@ async def select_relevant_examples(
         raise ValueError(
             f"Failed to extract content from LLM response: {e}\nResponse: {response}"
         )
-
-    log("[agent] Parsed content:", content)
     from .utils import extract_code_blocks
 
     try:
@@ -128,30 +121,28 @@ async def select_relevant_examples(
             f"Failed to parse LLM response as JSON: {e}\nResponse: {content}"
         )
 
-    # Extract analysis
     analysis = result.get("analysis", "")
 
-    # Process selected examples
-    selected_indices = []
-    selection_reasons = {}
-    for example in result.get("selected_examples", []):
-        try:
-            idx = int(example["id"]) - 1  # Convert from 1-based to 0-based indexing
-            if 0 <= idx < len(available_examples):
-                selected_indices.append(idx)
-                selection_reasons[available_examples[idx].name] = example["reason"]
-        except (ValueError, KeyError) as e:
-            print(f"Warning: Invalid selected example format: {example}, Error: {e}")
+    def _process_example_list(examples, available_examples, is_selected=True):
+        indices = []
+        reasons_dict = {}
 
-    # Process excluded examples
-    exclusion_reasons = {}
-    for example in result.get("excluded_examples", []):
-        try:
-            idx = int(example["id"]) - 1  # Convert from 1-based to 0-based indexing
+        for example in examples:
+            idx = int(example["id"]) - 1
             if 0 <= idx < len(available_examples):
-                exclusion_reasons[available_examples[idx].name] = example["reason"]
-        except (ValueError, KeyError) as e:
-            print(f"Warning: Invalid excluded example format: {example}, Error: {e}")
+                if is_selected:
+                    indices.append(idx)
+                reasons_dict[available_examples[idx].name] = example["reason"]
+
+        return indices, reasons_dict
+
+    selected_indices, selection_reasons = _process_example_list(
+        result.get("selected_examples", []), available_examples, is_selected=True
+    )
+
+    _, exclusion_reasons = _process_example_list(
+        result.get("excluded_examples", []), available_examples, is_selected=False
+    )
 
     selected_examples = [
         available_examples[i]
