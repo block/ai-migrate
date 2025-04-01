@@ -10,6 +10,8 @@ from pathlib import Path
 import subprocess
 from typing import Any, Iterable, Optional
 
+from .utils import extract_code_blocks
+
 from pydantic_ai.messages import ToolCallPart
 from pydantic_ai.tools import Tool
 from pydantic_ai import RunContext
@@ -453,48 +455,6 @@ async def run(
         target_basename=target_basename,
         tools=tools,
     )
-
-
-@dataclass
-class CodeBlock:
-    filename: str | None
-    code: str
-
-
-@dataclass
-class CodeResponseResult:
-    code_blocks: list[CodeBlock]
-    other_text: str
-
-
-def extract_code_blocks(markdown, replacement="<code>") -> CodeResponseResult:
-    lines = markdown.splitlines()
-    filename = None
-    line_it = iter(lines)
-    result = CodeResponseResult([], "")
-    other_text = []
-
-    for line in line_it:
-        if line.lstrip().startswith("### ") and line.count("`") == 2:
-            start = line.find("`")
-            end = line.find("`", start + 1)
-            filename = line[start + 1 : end]
-        elif line.lstrip().startswith("```"):
-            code = []
-            for line in line_it:
-                if line.lstrip().startswith("```"):
-                    break
-                code.append(line)
-            result.code_blocks.append(CodeBlock(filename, "\n".join(code)))
-            filename = None
-            other_text.append(replacement)
-        else:
-            other_text.append(line)
-
-    if other_text:
-        result.other_text = "\n".join(other_text)
-
-    return result
 
 
 class FailedPreVerification(Exception):

@@ -1,5 +1,6 @@
 """Example selection logic for optimizing migration context."""
 
+import json
 from dataclasses import dataclass
 from typing import List
 from pathlib import Path
@@ -87,12 +88,19 @@ async def select_relevant_examples(
 
     response, _ = await client.generate_completion(messages=messages, temperature=0.1)
     content = response["choices"][0]["message"]["content"]
-    
-    import json
+
+    from .utils import extract_code_blocks
+
     try:
-        result = json.loads(content)
+        parsed_result = extract_code_blocks(content)
+        if parsed_result.code_blocks:
+            result = json.loads(parsed_result.code_blocks[0].code)
+        else:
+            result = json.loads(content)
     except json.JSONDecodeError as e:
-        raise ValueError(f"Failed to parse LLM response as JSON: {e}\nResponse: {content}")
+        raise ValueError(
+            f"Failed to parse LLM response as JSON: {e}\nResponse: {content}"
+        )
 
     # Extract analysis
     analysis = result.get("analysis", "")
