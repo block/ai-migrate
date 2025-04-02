@@ -597,7 +597,6 @@ async def _run(
                 cwd=worktree_root,
             )
 
-    verification_complete = False
     for tries in range(int(os.getenv("AI_MIGRATE_MAX_TRIES", 10))):
         log(f"[agent] Running migration attempt {tries + 1}")
 
@@ -720,7 +719,6 @@ async def _run(
         )
 
         if verify_process.returncode == 0:
-            verification_complete = True
             log("Verification successful")
 
             if not dont_create_evals:
@@ -795,9 +793,6 @@ async def _run(
 
     else:
         log("Migration failed: Out of tries")
-
-    if verification_complete:
-        return True
 
     if goose_config:
         for i in range(goose_config.max_retries):
@@ -959,15 +954,11 @@ You may verify if the migration is corrrect by running the following command:
             )
 
             if verify_process.returncode == 0:
-                verification_complete = True
                 log("Verification successful")
-                break
+                return True
             else:
                 log("Verification failed:")
                 for line in verification_output.splitlines():
                     log(f"[verify] {line}")
-
-        if verification_complete:
-            return True
 
     raise ValueError("Migration failed: Out of tries")
