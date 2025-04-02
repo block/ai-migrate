@@ -17,7 +17,7 @@ from ai_migrate.llm_providers import DefaultClient
 from .context import MigrationContext, ToolCallContext
 from .fake_llm_client import FakeLLMClient
 from .git_identity import environment_variables
-from .manifest import FileGroup, FileEntry, Manifest
+from .manifest import FileGroup, FileEntry, GooseConfig, Manifest
 from .eval_generator import generate_eval_from_migration
 
 
@@ -349,6 +349,7 @@ async def run(
     target_basename: str = "",
     dont_create_evals: bool = False,
     tools: list[Tool] = None,
+    goose: Optional[GooseConfig] = None,
 ):
     """Run the migration process on the target files.
     Args:
@@ -529,6 +530,7 @@ async def _run(
     target_dir_rel_path: Path | str | None = None,
     target_basename: str = None,
     tools: list[Tool] = None,
+    goose_config: Optional[GooseConfig] = None,
 ):
     if llm_fakes:
         client = FakeLLMClient(llm_fakes)
@@ -568,6 +570,7 @@ async def _run(
 
     messages = combine_examples_into_conversation(examples, target, system_prompt)
     all_files_to_verify = set()
+    full_verify_cmd = []
 
     iteration_messages = []
 
@@ -594,6 +597,7 @@ async def _run(
                 cwd=worktree_root,
             )
 
+    verification_complete = False
     for tries in range(int(os.getenv("AI_MIGRATE_MAX_TRIES", 10))):
         log(f"[agent] Running migration attempt {tries + 1}")
 
@@ -716,6 +720,7 @@ async def _run(
         )
 
         if verify_process.returncode == 0:
+            verification_complete = True
             log("Verification successful")
 
             if not dont_create_evals:
@@ -789,4 +794,135 @@ async def _run(
         iteration_messages.append(iteration_message)
 
     else:
-        raise ValueError("Migration failed: Out of tries")
+        log("Migration failed: Out of tries")
+    
+    if verification_complete:
+        return True
+    
+    if goose_config:
+        for i in range(goose_config.max_retries):
+            log(f"Running migration attempt {i + 1} with Goose")
+
+            if goose_config.system_prompt:
+                prompt = Path(goose_config.system_prompt).read_text()
+            else:
+                prompt = ""
+
+            await subprocess_run(
+                ["goose", "run", "--text", prompt, "--with-builtin", "developer"],
+                check=True,
+                cwd=worktree_root,
+            )
+
+            goose_command = ["goose", "run", "--text", prompt, "--with-builtin", "developer"]
+
+            goose_process = await asyncio.create_subprocess_exec(
+                *goose_command,
+                cwd=worktree_root,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE,
+            )
+            stdout, stderr = await goose_process.communicate()
+            goose_output = (stderr or stdout or b"").decode()
+            for line in goose_output.splitlines():
+                log(f"[goose] {line}")
+
+            verify_process = await asyncio.create_subprocess_exec(
+                *full_verify_cmd,
+                cwd=worktree_root,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE,
+            )
+            stdout, stderr = await verify_process.communicate()
+            status = "pass" if verify_process.returncode == 0 else "fail"
+        
+
+            if target_dir:
+                git_path = Path(file_path).relative_to(worktree_root)
+
+                # Only allow files inside target_dir_rel_path to be added
+                await subprocess_run(
+                    ["git", "reset", "--", target_dir_rel_path],
+                    cwd=worktree_root,
+                )
+
+                await subprocess_run(
+                    ["git", "add", git_path],
+                    cwd=worktree_root,
+                )
+            else:
+                for file in written_files:
+                    await subprocess_run(
+                        ["git", "add", *written_files],
+                        cwd=worktree_root,
+                    )
+
+            commit_message = f"Goose attempt {i + 1} {status=}:\n\nGoose response:\n{goose_output}"
+
+            if target_dir:
+                file_path = (
+                    Path(worktree_root) / target_dir_rel_path / target_basename / file
+                )
+                git_path = Path(file_path).relative_to(worktree_root)
+                await subprocess_run(
+                    ["git", "add", git_path],
+                    cwd=worktree_root,
+                )
+            else:
+                for file in written_files:
+                    await subprocess_run(
+                        ["git", "add", file],
+                        cwd=worktree_root,
+                    )
+
+            await subprocess_run(
+                ["git", "commit", "--allow-empty", "-m", commit_message],
+                check=True,
+                cwd=worktree_root,
+                env={**os.environ, **environment_variables()},
+            )
+
+            # Clean up anything else goose may have added
+            await subprocess_run(
+                ["git", "reset", "--hard"],
+                cwd=worktree_root,
+            )
+
+            # Run verification again, in case goose cheated.
+            verify_process = await asyncio.create_subprocess_exec(
+                *full_verify_cmd,
+                cwd=worktree_root,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE,
+            )
+            stdout, stderr = await verify_process.communicate()
+            status = "pass" if verify_process.returncode == 0 else "fail"
+
+            verification_output = (stderr or stdout or b"").decode()
+            await subprocess_run(
+                [
+                    "git",
+                    "notes",
+                    "--ref=migrator-verify",
+                    "add",
+                    "-f",
+                    "-m",
+                    verification_output,
+                ],
+                check=True,
+                cwd=worktree_root,
+            )
+
+            if verify_process.returncode == 0:
+                verification_complete = True
+                log("Verification successful")
+                break
+            else:
+                log("Verification failed:")
+                for line in verification_output.splitlines():
+                    log(f"[verify] {line}")
+
+        if verification_complete:
+            return True
+
+    raise ValueError("Migration failed: Out of tries")
