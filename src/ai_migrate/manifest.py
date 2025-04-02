@@ -70,6 +70,7 @@ class Directory(BaseModel):
         base_name = self.dir.split("/")[-1]
         return FileGroup(files=files, result=self.result, base_name=base_name)
 
+
 class GooseConfig(BaseModel):
     system_prompt: str = f"{{project_dir}}/{GOOSE_PROMPT_FILE}"
     time_out_minutes: int = 15

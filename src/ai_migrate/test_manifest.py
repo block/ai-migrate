@@ -99,11 +99,9 @@ def test_valid_manifest_groups():
     # The hash should be different because the glob pattern is different
     assert dir_glob_group_name.split("-")[1] != dir_group_name.split("-")[1]
 
-
     assert manifest.goose.system_prompt == "{project_dir}/goose_prompt.md"
     assert manifest.goose.time_out_minutes == 15
     assert manifest.goose.max_retries == 3
-
 
 
 def test_normalize_files():

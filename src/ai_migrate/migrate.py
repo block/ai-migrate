@@ -795,26 +795,54 @@ async def _run(
 
     else:
         log("Migration failed: Out of tries")
-    
+
     if verification_complete:
         return True
-    
+
     if goose_config:
         for i in range(goose_config.max_retries):
             log(f"Running migration attempt {i + 1} with Goose")
 
             if goose_config.system_prompt:
-                prompt = Path(goose_config.system_prompt).read_text()
+                goose_extra = Path(goose_config.system_prompt).read_text()
             else:
-                prompt = ""
+                goose_extra = ""
+
+            directory_instructions = (
+                f"You may only make changes to the files inside {target_dir_rel_path}"
+                if target_dir
+                else f"You may only make changes to the files: {', '.join(target_files)}"
+            )
+
+            verify_cmd_str = " ".join(full_verify_cmd)
+
+            goose_prompt = f"""
+You are a helpful assistant that can help with code migration. The migration is almost done but is not passing verification. With as few changes as possible, make the migration pass verification.
+
+{directory_instructions}
+
+You may verify if the migration is corrrect by running the following command:
+
+{verify_cmd_str}
+"""
+
+            if goose_extra:
+                goose_prompt += f"\n\n{goose_extra}"
 
             await subprocess_run(
-                ["goose", "run", "--text", prompt, "--with-builtin", "developer"],
+                ["goose", "run", "--text", goose_prompt, "--with-builtin", "developer"],
                 check=True,
                 cwd=worktree_root,
             )
 
-            goose_command = ["goose", "run", "--text", prompt, "--with-builtin", "developer"]
+            goose_command = [
+                "goose",
+                "run",
+                "--text",
+                goose_prompt,
+                "--with-builtin",
+                "developer",
+            ]
 
             goose_process = await asyncio.create_subprocess_exec(
                 *goose_command,
@@ -826,11 +854,13 @@ async def _run(
             async def kill_after_timeout():
                 await asyncio.sleep(goose_config.timeout * 60)
                 if goose_process.returncode is None:
-                    log(f"[goose] Killing process after {goose_config.timeout} minutes timeout")
+                    log(
+                        f"[goose] Killing process after {goose_config.timeout} minutes timeout"
+                    )
                     goose_process.kill()
 
             timeout_task = asyncio.create_task(kill_after_timeout())
-            
+
             try:
                 stdout, stderr = await goose_process.communicate()
                 timeout_task.cancel()
@@ -838,7 +868,7 @@ async def _run(
                 if goose_process.returncode is None:
                     goose_process.kill()
                 raise
-                
+
             goose_output = (stderr or stdout or b"").decode()
             for line in goose_output.splitlines():
                 log(f"[goose] {line}")
@@ -851,7 +881,6 @@ async def _run(
             )
             stdout, stderr = await verify_process.communicate()
             status = "pass" if verify_process.returncode == 0 else "fail"
-        
 
             if target_dir:
                 git_path = Path(file_path).relative_to(worktree_root)
@@ -873,12 +902,12 @@ async def _run(
                         cwd=worktree_root,
                     )
 
-            commit_message = f"Goose attempt {i + 1} {status=}:\n\nGoose response:\n{goose_output}"
+            commit_message = (
+                f"Goose attempt {i + 1} {status=}:\n\nGoose response:\n{goose_output}"
+            )
 
             if target_dir:
-                file_path = (
-                    Path(worktree_root) / target_dir_rel_path / target_basename
-                )
+                file_path = Path(worktree_root) / target_dir_rel_path / target_basename
                 git_path = Path(file_path).relative_to(worktree_root)
                 await subprocess_run(
                     ["git", "add", git_path],
