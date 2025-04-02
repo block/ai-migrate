@@ -5,13 +5,14 @@ on:
 
 jobs:
   check:
-    name: Ruff check
+    name: Ruff & uv check
     runs-on: ubuntu-latest
 
     steps:
       - uses: actions/checkout@v4
       - uses: cashapp/activate-hermit@v1
       - run: |
+          uv lock --check
           uv run ruff check .
           uv run ruff format --check
 
