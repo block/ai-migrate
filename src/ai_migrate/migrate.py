@@ -822,7 +822,23 @@ async def _run(
                 stdout=subprocess.PIPE,
                 stderr=subprocess.PIPE,
             )
-            stdout, stderr = await goose_process.communicate()
+
+            async def kill_after_timeout():
+                await asyncio.sleep(goose_config.timeout * 60)
+                if goose_process.returncode is None:
+                    log(f"[goose] Killing process after {goose_config.timeout} minutes timeout")
+                    goose_process.kill()
+
+            timeout_task = asyncio.create_task(kill_after_timeout())
+            
+            try:
+                stdout, stderr = await goose_process.communicate()
+                timeout_task.cancel()
+            except asyncio.CancelledError:
+                if goose_process.returncode is None:
+                    goose_process.kill()
+                raise
+                
             goose_output = (stderr or stdout or b"").decode()
             for line in goose_output.splitlines():
                 log(f"[goose] {line}")
@@ -861,7 +877,7 @@ async def _run(
 
             if target_dir:
                 file_path = (
-                    Path(worktree_root) / target_dir_rel_path / target_basename / file
+                    Path(worktree_root) / target_dir_rel_path / target_basename
                 )
                 git_path = Path(file_path).relative_to(worktree_root)
                 await subprocess_run(
