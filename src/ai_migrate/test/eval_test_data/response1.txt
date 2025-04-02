@@ -1,8 +1,10 @@
-Here's the migrated code:
-
-### `example.py`
-```python
-def new_function():
-    print("This is the migrated version")
-    return "New implementation"
-```
+{
+    "analysis": "The target file contains a simple function that needs to be migrated. The function prints a message and returns a string.",
+    "selected_examples": [
+        {
+            "id": 1,
+            "reason": "This example demonstrates the pattern needed for migrating a simple function with print statement and return value."
+        }
+    ],
+    "excluded_examples": []
+}

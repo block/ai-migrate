@@ -1,5 +1,6 @@
 """Utilities for generating system prompts and other common tasks."""
 
+from dataclasses import dataclass
 from typing import Optional, List
 from pydantic import BaseModel
 
@@ -10,6 +11,48 @@ class PRDetails(BaseModel):
     files: List[dict]
     additions: int
     deletions: int
+
+
+@dataclass
+class CodeBlock:
+    filename: str | None
+    code: str
+
+
+@dataclass
+class CodeResponseResult:
+    code_blocks: list[CodeBlock]
+    other_text: str
+
+
+def extract_code_blocks(markdown, replacement="<code>") -> CodeResponseResult:
+    lines = markdown.splitlines()
+    filename = None
+    line_it = iter(lines)
+    result = CodeResponseResult([], "")
+    other_text = []
+
+    for line in line_it:
+        if line.lstrip().startswith("### ") and line.count("`") == 2:
+            start = line.find("`")
+            end = line.find("`", start + 1)
+            filename = line[start + 1 : end]
+        elif line.lstrip().startswith("```"):
+            code = []
+            for line in line_it:
+                if line.lstrip().startswith("```"):
+                    break
+                code.append(line)
+            result.code_blocks.append(CodeBlock(filename, "\n".join(code)))
+            filename = None
+            other_text.append(replacement)
+        else:
+            other_text.append(line)
+
+    if other_text:
+        result.other_text = "\n".join(other_text)
+
+    return result
 
 
 async def generate_system_prompt(

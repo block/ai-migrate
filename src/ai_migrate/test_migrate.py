@@ -6,11 +6,10 @@ from ai_migrate.migrate import (
     FileContent,
     migrate_prompt,
     extract_code_blocks,
-    CodeResponseResult,
-    CodeBlock,
     MigrationExample,
     read_file_pairs_from,
 )
+from ai_migrate.utils import CodeResponseResult, CodeBlock
 
 
 @pytest.fixture

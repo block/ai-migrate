@@ -1,0 +1,8 @@
+Here's the migrated code:
+
+### `example.py`
+```python
+def new_function():
+    print("This is the migrated version")
+    return "New implementation"
+```
