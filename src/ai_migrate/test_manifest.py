@@ -22,7 +22,8 @@ def test_valid_manifest():
   "system_prompt": "{project_dir}/system_prompt.md",
   "verify_cmd": "{py} {project_dir}/verify.py",
   "pre_verify_cmd": "{py} {project_dir}/verify.py --pre",
-  "time": "2025-02-10T11:26:33.969758"
+  "time": "2025-02-10T11:26:33.969758",
+  "goose": {}
 }
     """
     Manifest.model_validate_json(json)
@@ -57,7 +58,12 @@ def test_valid_manifest_groups():
   "system_prompt": "{project_dir}/system_prompt.md",
   "verify_cmd": "{py} {project_dir}/verify.py",
   "pre_verify_cmd": "{py} {project_dir}/verify.py --pre",
-  "time": "2025-02-10T11:26:33.969758"
+  "time": "2025-02-10T11:26:33.969758",
+  "goose": {
+    "system_prompt": "{project_dir}/goose_prompt.md",
+    "time_out_minutes": 15,
+    "max_retries": 3
+  }
 }
     """
     manifest = Manifest.model_validate_json(json)
@@ -92,6 +98,12 @@ def test_valid_manifest_groups():
     )  # Check that the hash is 8 characters
     # The hash should be different because the glob pattern is different
     assert dir_glob_group_name.split("-")[1] != dir_group_name.split("-")[1]
+
+
+    assert manifest.goose.system_prompt == "{project_dir}/goose_prompt.md"
+    assert manifest.goose.time_out_minutes == 15
+    assert manifest.goose.max_retries == 3
+
 
 
 def test_normalize_files():
