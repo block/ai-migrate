@@ -18,7 +18,7 @@ from .manifest import (
     Directory,
 )
 from .migrate import run as run_migration, FailedPreVerification
-from .progress import StatusManager
+from .progress import StatusManager, Status
 
 
 def get_git_sha(directory: str | Path) -> str:
@@ -75,6 +75,18 @@ def load_tools_from_dir(project_dir: str) -> list[Tool]:
     return []
 
 
+class Tee:
+    def __init__(self, *files):
+        self.files = files
+
+    def write(self, data):
+        for f in self.files:
+            f.write(data)
+
+    def flush(self):
+        for f in self.files:
+            f.flush()
+
 async def run(
     project_dir: str,
     logs_dir: str | Path,
@@ -127,12 +139,14 @@ async def run(
         if target_sha is None:
             target_sha = get_git_sha(Path(files.files[0]).parent)
 
-        await status_manager.update_message(task_name, "Running...")
+        await status_manager.mark_with_status(task_name, Status.RUNNING)
 
         log_file = (logs_dir / task_name).with_suffix(".log")
         log_file.parent.mkdir(parents=True, exist_ok=True)
-
         log_buffer = open(log_file, "w")
+
+        logger = Tee(status_manager.get_logger(task_name, header=f"==> {log_file} <=="), log_buffer)
+
         try:
             await run_migration(
                 files.files,
@@ -144,7 +158,7 @@ async def run(
                 pre_verify_cmd=manifest.pre_verify_cmd.format(
                     project_dir=project_dir, py=sys.executable
                 ),
-                log_stream=log_buffer,
+                log_stream=logger,
                 local_worktrees=local_worktrees,
                 llm_fakes=llm_fakes,
                 dont_create_evals=dont_create_evals,
@@ -153,16 +167,15 @@ async def run(
                 tools=tools,
             )
             new_result = "pass"
-            await status_manager.mark_passed(task_name)
+            await status_manager.mark_with_status(task_name, Status.PASSED)
         except FailedPreVerification:
-            await status_manager.mark_failed(task_name)
+            await status_manager.mark_with_status(task_name, Status.FAILED)
             new_result = "fail-pre-verify"
         except Exception:
-            await status_manager.mark_failed(task_name)
-            traceback.print_exc(file=log_buffer)
+            await status_manager.mark_with_status(task_name, Status.FAILED)
+            traceback.print_exc(file=logger)
             new_result = "fail"
         finally:
-            await status_manager.update_message(task_name, "")
             log_buffer.close()
 
         results.append(FileGroup(files=files.files, result=new_result))
@@ -184,7 +197,6 @@ async def run(
                 task_name = task_name + f" (+{len(file_set.files) - 1})"
 
             await status_manager.add_status(task_name)
-            await status_manager.update_message(task_name, "Waiting...")
             tg.create_task(process_one_with_sem(i, file_set, task_name))
 
     print("Project run complete.")
