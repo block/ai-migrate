@@ -262,7 +262,12 @@ def combine_examples_into_conversation(
 
 
 async def call_llm(
-    client: DefaultClient, messages: list, tools: list[Tool], *, context: MigrationContext, temperature=0.1
+    client: DefaultClient,
+    messages: list,
+    tools: list[Tool],
+    *,
+    context: MigrationContext,
+    temperature=0.1,
 ) -> tuple[dict, list[dict]]:
     """Call LLM for completions
 
@@ -603,8 +608,13 @@ async def _run(
             iteration_messages = iteration_messages[1:]
             messages = build_messages(messages, iteration_messages)
 
-        context = MigrationContext(target_files=target_files)
-        response, messages = await call_llm(client, messages, tools or [], context=context)
+        context = MigrationContext(
+            target_files=target_files,
+            target_dir=Path(target_dir) if target_dir else None,
+        )
+        response, messages = await call_llm(
+            client, messages, tools or [], context=context
+        )
 
         response_text = response["choices"][0]["message"]["content"]
         parsed_result = extract_code_blocks(response_text)
