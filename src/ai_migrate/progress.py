@@ -1,9 +1,8 @@
 import asyncio
-import io
 import sys
 import itertools
 from enum import StrEnum
-from typing import Dict, Literal
+from typing import Dict
 import shutil
 
 
@@ -22,7 +21,7 @@ class StatusLog:
 
     def write(self, s: str):
         self.lines.extend(s.removesuffix("\n").splitlines())
-        self.lines = self.lines[-self.line_limit:]
+        self.lines = self.lines[-self.line_limit :]
 
     def flush(self):
         pass
@@ -60,14 +59,22 @@ class StatusBar:
 
         name_part = f"{self.name}: "
         padding = terminal_width - len(name_part) - len(right_part)
-        logs = [
-            f"    {line}"[:terminal_width] for line in self.logger.getvalue().splitlines()
-        ] if self.status == Status.RUNNING else []
-        return f"\r{name_part}{' ' * max(0, padding)}{right_part}" + (f"\n{"\n".join(logs)}" if logs else "")
+        logs = (
+            [
+                f"    {line}"[:terminal_width]
+                for line in self.logger.getvalue().splitlines()
+            ]
+            if self.status == Status.RUNNING
+            else []
+        )
+        return f"\r{name_part}{' ' * max(0, padding)}{right_part}" + (
+            f"\n{'\n'.join(logs)}" if logs else ""
+        )
 
     def get_logger(self, header: str):
         self.logger.header = header
         return self.logger
+
 
 class StatusManager:
     def __init__(self):
@@ -101,7 +108,10 @@ class StatusManager:
 
         self._last_render_lines = 0
         bars = list(self.bars.values())
-        bars = itertools.groupby(sorted(bars, key=lambda bar: (bar.status, bar.name)), key=lambda bar: bar.status)
+        bars = itertools.groupby(
+            sorted(bars, key=lambda bar: (bar.status, bar.name)),
+            key=lambda bar: bar.status,
+        )
         for status, bars in bars:
             bars = [*bars]
             if status == Status.WAITING:
@@ -112,7 +122,6 @@ class StatusManager:
                     rendered = bar.render()
                     print(rendered)
                     self._last_render_lines += len(rendered.splitlines())
-
 
     async def mark_with_status(self, name: str, status: Status):
         async with self.lock:
@@ -137,4 +146,3 @@ class StatusManager:
 
     def get_logger(self, name: str, header: str = ""):
         return self.bars[name].get_logger(header=header)
-

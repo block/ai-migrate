@@ -87,6 +87,7 @@ class Tee:
         for f in self.files:
             f.flush()
 
+
 async def run(
     project_dir: str,
     logs_dir: str | Path,
@@ -145,7 +146,10 @@ async def run(
         log_file.parent.mkdir(parents=True, exist_ok=True)
         log_buffer = open(log_file, "w")
 
-        logger = Tee(status_manager.get_logger(task_name, header=f"==> {log_file} <=="), log_buffer)
+        logger = Tee(
+            status_manager.get_logger(task_name, header=f"==> {log_file} <=="),
+            log_buffer,
+        )
 
         try:
             await run_migration(
