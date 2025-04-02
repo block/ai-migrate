@@ -12,9 +12,9 @@ from typing import Any, Iterable, Optional
 
 from pydantic_ai.messages import ToolCallPart
 from pydantic_ai.tools import Tool
-from pydantic_ai import RunContext
 
 from ai_migrate.llm_providers import DefaultClient
+from .context import MigrationContext, ToolCallContext
 from .fake_llm_client import FakeLLMClient
 from .git_identity import environment_variables
 from .manifest import FileGroup, FileEntry, Manifest
@@ -29,9 +29,6 @@ LOG_STREAM = contextvars.ContextVar("LOG_STREAM", default=sys.stdout)
 
 def log(*args, **kwargs):
     print(*args, **kwargs, file=LOG_STREAM.get(), flush=True)
-
-
-NoneContext = RunContext[None]
 
 
 @dataclass
@@ -201,7 +198,7 @@ def migrate_prompt(example: MigrationExample) -> list[dict]:
 
 
 async def handle_tool_calls(
-    tools: list[Tool], tool_calls: list[dict[str, Any]]
+    tools: list[Tool], tool_calls: list[dict[str, Any]], context: MigrationContext
 ) -> list[dict[str, str]]:
     tool_results = []
     tools_by_name = {tool.name: tool for tool in tools}
@@ -215,8 +212,8 @@ async def handle_tool_calls(
                 log("[agent] Running tool", tool.name, f"{tool_call_message=}")
                 result = await tool._run(
                     tool_call_message,
-                    NoneContext(
-                        deps=None,
+                    ToolCallContext(
+                        deps=context,
                         model=None,
                         usage=None,
                         prompt="",
@@ -265,7 +262,7 @@ def combine_examples_into_conversation(
 
 
 async def call_llm(
-    client: DefaultClient, messages: list, tools: list[Tool], temperature=0.1
+    client: DefaultClient, messages: list, tools: list[Tool], *, context: MigrationContext, temperature=0.1
 ) -> tuple[dict, list[dict]]:
     """Call LLM for completions
 
@@ -283,7 +280,7 @@ async def call_llm(
         if not (tool_calls := assistant_message.get("tool_calls")):
             return response, messages
 
-        tool_results = await handle_tool_calls(tools, tool_calls)
+        tool_results = await handle_tool_calls(tools, tool_calls, context)
 
         messages.append(assistant_message)
         for result in tool_results:
@@ -606,7 +603,8 @@ async def _run(
             iteration_messages = iteration_messages[1:]
             messages = build_messages(messages, iteration_messages)
 
-        response, messages = await call_llm(client, messages, tools or [])
+        context = MigrationContext(target_files=target_files)
+        response, messages = await call_llm(client, messages, tools or [], context=context)
 
         response_text = response["choices"][0]["message"]["content"]
         parsed_result = extract_code_blocks(response_text)
