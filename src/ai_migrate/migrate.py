@@ -808,9 +808,9 @@ async def _run(
                 goose_extra = ""
 
             directory_instructions = (
-                f"You may only make changes to the files inside {target_dir_rel_path}/{target_basename}"
+                f"You may only make changes to the files inside {target_dir_rel_path}/{target_basename}. Under no circumstances should you touch any files outside of this directory. If I detect that you do, I will be very disappointed in you and you will be fired."
                 if target_dir
-                else f"You may only make changes to the files: {', '.join(target_files)}"
+                else f"You may only make changes to the files: {', '.join(target_files)}. Under no circumstances should you touch any other files."
             )
 
             verify_cmd_str = " ".join(full_verify_cmd)
@@ -823,6 +823,8 @@ You are a helpful assistant for code migration. The migration is almost done but
 You may verify if the migration is correct by running the following command:
 
 {verify_cmd_str}
+
+The verification output may be large so pipe it to a file and read it from there.
 
 Keep trying until the migration passes verification.
 """
@@ -895,25 +897,25 @@ Keep trying until the migration passes verification.
 
             goose_output = "\n".join(output_lines[-50:])
 
-            if target_dir:
-                git_path = Path(file_path).relative_to(worktree_root)
+            # if target_dir:
+            #     git_path = Path(file_path).relative_to(worktree_root)
 
-                # Only allow files inside target_dir_rel_path to be added
-                await subprocess_run(
-                    ["git", "reset", "--", target_dir_rel_path],
-                    cwd=worktree_root,
-                )
+            #     # Only allow files inside target_dir_rel_path to be added
+            #     await subprocess_run(
+            #         ["git", "reset", "--", target_dir_rel_path],
+            #         cwd=worktree_root,
+            #     )
 
-                await subprocess_run(
-                    ["git", "add", git_path],
-                    cwd=worktree_root,
-                )
-            else:
-                for file in written_files:
-                    await subprocess_run(
-                        ["git", "add", *written_files],
-                        cwd=worktree_root,
-                    )
+            #     await subprocess_run(
+            #         ["git", "add", git_path],
+            #         cwd=worktree_root,
+            #     )
+            # else:
+            #     for file in written_files:
+            #         await subprocess_run(
+            #             ["git", "add", *written_files],
+            #             cwd=worktree_root,
+            #         )
 
             commit_message = (
                 f"Goose attempt {i + 1}:\n\nGoose response:\n{goose_output}"
