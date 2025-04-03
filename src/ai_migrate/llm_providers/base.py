@@ -13,6 +13,7 @@ class BaseLLMClient(ABC):
         temperature: float = 0.1,
         max_tokens: int = 8192,
         model: str | None = None,
+        response_format: dict[str, Any] | None = None,
     ) -> tuple[dict[str, Any], list[dict[str, Any]]]:
         """Generate a completion from the LLM.
 
@@ -22,6 +23,8 @@ class BaseLLMClient(ABC):
             temperature: The temperature to use for generation
             max_tokens: The maximum number of tokens to generate
             model: Optional model override
+            response_format: Optional response format specification, e.g. for JSON Schema
+                           Example: {"type": "json_schema", "schema": {...}}
 
         Returns:
             A tuple of (response, messages)
