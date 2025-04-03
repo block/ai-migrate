@@ -812,12 +812,10 @@ async def _run(
                 else f"You may only make changes to the files: {', '.join(target_files)}"
             )
 
-            log(full_verify_cmd)
-
             verify_cmd_str = " ".join(full_verify_cmd)
 
             goose_prompt = f"""
-You are a helpful assistant fo code migration. The migration is almost done but is not passing verification. With as few changes as possible, make the migration pass verification.
+You are a helpful assistant for code migration. The migration is almost done but is not passing verification. With as few changes as possible, make the migration pass verification.
 
 {directory_instructions}
 
@@ -846,7 +844,6 @@ Keep trying until the migration passes verification.
                 "developer",
             ]
 
-            log(directory_instructions)
             log(f"Running goose: {goose_command}")
 
             goose_process = await asyncio.create_subprocess_exec(
