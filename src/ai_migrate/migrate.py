@@ -854,26 +854,45 @@ Keep trying until the migration passes verification.
             )
 
             async def kill_after_timeout():
-                await asyncio.sleep(goose.timeout * 60)
+                await asyncio.sleep(goose.timeout_seconds)
                 if goose_process.returncode is None:
                     log(
-                        f"[goose] Killing process after {goose.timeout} minutes timeout"
+                        f"[goose] Killing process after {goose.timeout_seconds} seconds timeout"
                     )
                     goose_process.kill()
 
             timeout_task = asyncio.create_task(kill_after_timeout())
-
+            
+            # Stream and collect output
+            output_lines = []
+            
+            async def read_stream(stream, prefix):
+                while True:
+                    line = await stream.readline()
+                    if not line:
+                        break
+                    decoded = line.decode().rstrip()
+                    log(f"[{prefix}] {decoded}")
+                    output_lines.append(decoded)
+                    
+            # Create tasks for reading stdout and stderr
+            stdout_task = asyncio.create_task(read_stream(goose_process.stdout, "goose"))
+            stderr_task = asyncio.create_task(read_stream(goose_process.stderr, "goose-err"))
+            
             try:
-                stdout, stderr = await goose_process.communicate()
+                # Wait for process to complete and streams to be fully read
+                await goose_process.wait()
+                await stdout_task
+                await stderr_task
                 timeout_task.cancel()
             except asyncio.CancelledError:
                 if goose_process.returncode is None:
                     goose_process.kill()
+                stdout_task.cancel()
+                stderr_task.cancel()
                 raise
 
-            goose_output = (stderr or stdout or b"").decode()
-            for line in goose_output.splitlines():
-                log(f"[goose] {line}")
+            goose_output = "\n".join(output_lines)
 
             verify_process = await asyncio.create_subprocess_exec(
                 *full_verify_cmd,

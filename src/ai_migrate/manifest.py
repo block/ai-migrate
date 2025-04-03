@@ -73,7 +73,7 @@ class Directory(BaseModel):
 
 class GooseConfig(BaseModel):
     system_prompt: str = f"{{project_dir}}/{GOOSE_PROMPT_FILE}"
-    time_out_minutes: int = 15
+    timeout_seconds: int = 15 * 60
     max_retries: int = 3
 
 
