@@ -813,23 +813,25 @@ async def _run(
             verify_cmd_str = " ".join(full_verify_cmd)
 
             goose_prompt = f"""
-You are a helpful assistant that can help with code migration. The migration is almost done but is not passing verification. With as few changes as possible, make the migration pass verification.
+You are a helpful assistant fo code migration. The migration is almost done but is not passing verification. With as few changes as possible, make the migration pass verification.
 
 {directory_instructions}
 
-You may verify if the migration is corrrect by running the following command:
+You may verify if the migration is correct by running the following command:
 
 {verify_cmd_str}
+
+Keep trying until the migration passes verification.
 """
 
             if goose_extra:
                 goose_prompt += f"\n\n{goose_extra}"
 
-            await subprocess_run(
-                ["goose", "run", "--text", goose_prompt, "--with-builtin", "developer"],
-                check=True,
-                cwd=worktree_root,
-            )
+            # await subprocess_run(
+            #     ["goose", "run", "--text", goose_prompt, "--with-builtin", "developer"],
+            #     check=True,
+            #     cwd=worktree_root,
+            # )
 
             goose_command = [
                 "goose",
@@ -848,10 +850,10 @@ You may verify if the migration is corrrect by running the following command:
             )
 
             async def kill_after_timeout():
-                await asyncio.sleep(goose_config.timeout * 60)
+                await asyncio.sleep(goose.timeout * 60)
                 if goose_process.returncode is None:
                     log(
-                        f"[goose] Killing process after {goose_config.timeout} minutes timeout"
+                        f"[goose] Killing process after {goose.timeout} minutes timeout"
                     )
                     goose_process.kill()
 
