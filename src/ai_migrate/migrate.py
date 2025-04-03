@@ -571,7 +571,19 @@ async def _run(
 
     messages = combine_examples_into_conversation(examples, target, system_prompt)
     all_files_to_verify = set()
-    full_verify_cmd = []
+
+    def build_verify_cmd(all_files_to_verify: set[str]):
+        if target_dir:
+            return [
+                *verify_cmd,
+                str(Path(target_dir_rel_path) / target_basename),
+            ]
+        return [
+            *verify_cmd,
+            *[str(Path(worktree_root) / f) for f in all_files_to_verify],
+        ]
+
+    full_verify_cmd = build_verify_cmd(all_files_to_verify)
 
     iteration_messages = []
 
@@ -656,17 +668,7 @@ async def _run(
 
         all_files_to_verify |= written_files
 
-        # Add the files to verify with the correct paths
-        if target_dir:
-            full_verify_cmd = [
-                *verify_cmd,
-                str(Path(target_dir_rel_path) / target_basename),
-            ]
-        else:
-            full_verify_cmd = [
-                *verify_cmd,
-                *[str(Path(worktree_root) / f) for f in all_files_to_verify],
-            ]
+        full_verify_cmd = build_verify_cmd(all_files_to_verify)
 
         log(f"Running verification: {full_verify_cmd}")
         verify_process = await asyncio.create_subprocess_exec(
@@ -805,10 +807,12 @@ async def _run(
                 goose_extra = ""
 
             directory_instructions = (
-                f"You may only make changes to the files inside {target_dir_rel_path}"
+                f"You may only make changes to the files inside {target_dir_rel_path}/{target_basename}"
                 if target_dir
                 else f"You may only make changes to the files: {', '.join(target_files)}"
             )
+
+            log(full_verify_cmd)
 
             verify_cmd_str = " ".join(full_verify_cmd)
 
@@ -841,6 +845,9 @@ Keep trying until the migration passes verification.
                 "--with-builtin",
                 "developer",
             ]
+
+            log(directory_instructions)
+            log(f"Running goose: {goose_command}")
 
             goose_process = await asyncio.create_subprocess_exec(
                 *goose_command,
