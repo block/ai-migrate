@@ -455,6 +455,7 @@ async def run(
         target_dir_rel_path=target_dir_rel_path,
         target_basename=target_basename,
         tools=tools,
+        goose=goose,
     )
 
 
@@ -530,7 +531,7 @@ async def _run(
     target_dir_rel_path: Path | str | None = None,
     target_basename: str = None,
     tools: list[Tool] = None,
-    goose_config: Optional[GooseConfig] = None,
+    goose: Optional[GooseConfig] = None,
 ):
     if llm_fakes:
         client = FakeLLMClient(llm_fakes)
@@ -794,12 +795,12 @@ async def _run(
     else:
         log("Migration failed: Out of tries")
 
-    if goose_config:
-        for i in range(goose_config.max_retries):
+    if goose:
+        for i in range(goose.max_retries):
             log(f"Running migration attempt {i + 1} with Goose")
 
-            if goose_config.system_prompt:
-                goose_extra = Path(goose_config.system_prompt).read_text()
+            if goose.system_prompt:
+                goose_extra = Path(goose.system_prompt).read_text()
             else:
                 goose_extra = ""
 

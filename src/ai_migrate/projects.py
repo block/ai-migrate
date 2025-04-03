@@ -150,6 +150,8 @@ async def run(
             status_manager.get_logger(task_name, header=f"==> {log_file} <=="),
             log_buffer,
         )
+        if manifest.goose:
+            manifest.goose.system_prompt = manifest.goose.system_prompt.format(project_dir=project_dir)
 
         try:
             await run_migration(
@@ -169,6 +171,7 @@ async def run(
                 target_dir=manifest.target_dir,
                 target_basename=files.base_name,
                 tools=tools,
+                goose=manifest.goose,
             )
             new_result = "pass"
             await status_manager.mark_with_status(task_name, Status.PASSED)
