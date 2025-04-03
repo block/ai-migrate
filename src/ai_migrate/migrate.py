@@ -824,7 +824,7 @@ You may verify if the migration is correct by running the following command:
 
 {verify_cmd_str}
 
-The verification output may be large so pipe it to a file and read it from there.
+The verification output may be large so pipe it to a file verification_output.txt and read it from there.
 
 Keep trying until the migration passes verification.
 """
