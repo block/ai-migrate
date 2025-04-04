@@ -772,7 +772,7 @@ async def _run(
                     log(f"Exception type: {type(e).__name__}")
 
             await remove_worktree(worktree_root)
-            break
+            return True
         log("Verification failed:")
         for line in verification_output.splitlines():
             log(f"[verify] {line}")
@@ -890,6 +890,35 @@ Keep trying until the migration passes verification.
 
             goose_output = "\n".join(output_lines[-50:])
 
+            # First, reset any changes to files outside allowed directories
+            if target_dir:
+                # Reset everything, then we'll re-add only the allowed files
+                await subprocess_run(
+                    ["git", "reset"],
+                    cwd=worktree_root,
+                )
+                
+                # Only add changes in the allowed directory
+                git_path = Path(target_dir_rel_path) / target_basename
+                await subprocess_run(
+                    ["git", "add", git_path],
+                    cwd=worktree_root,
+                )
+            else:
+                # Reset everything, then we'll re-add only the allowed files
+                await subprocess_run(
+                    ["git", "reset"],
+                    cwd=worktree_root,
+                )
+                
+                # Only add changes to the allowed files
+                for file in written_files:
+                    await subprocess_run(
+                        ["git", "add", file],
+                        cwd=worktree_root,
+                    )
+            
+            # Now run verification on the clean state with only allowed changes
             verify_process = await asyncio.create_subprocess_exec(
                 *full_verify_cmd,
                 cwd=worktree_root,
@@ -898,35 +927,25 @@ Keep trying until the migration passes verification.
             )
             stdout, stderr = await verify_process.communicate()
             verification_output = (stderr or stdout or b"").decode()
-            current_exit_code = verify_process.returncode
-            
-            if current_exit_code > best_exit_code and best_exit_code != 0:
-                log(f"Exit code {current_exit_code} is worse than previous best {best_exit_code}, resetting changes")
+            exit_code = verify_process.returncode
+
+            # If exit code is worse than our best so far (more failing tests), reset everything
+            if exit_code > best_exit_code and best_exit_code != 0:
+                log(f"Exit code {exit_code} is worse than previous best {best_exit_code}, resetting changes")
                 await subprocess_run(
                     ["git", "reset", "--hard"],
                     cwd=worktree_root,
                 )
                 continue
-                
-            best_exit_code = min(best_exit_code, current_exit_code)
 
+            # If this is better or equal to our best result so far, commit it
+            best_exit_code = min(best_exit_code, exit_code)
+            
             commit_message = (
-                f"Goose attempt {i + 1}, remaining tests: {current_exit_code}:\n\nGoose response:\n{goose_output}"
+                f"Goose attempt {i + 1}, remaining tests: {exit_code}:\n\nGoose response:\n{goose_output}"
             )
 
-            if target_dir:
-                git_path = Path(target_dir_rel_path) / target_basename
-                await subprocess_run(
-                    ["git", "add", git_path],
-                    cwd=worktree_root,
-                )
-            else:
-                for file in written_files:
-                    await subprocess_run(
-                        ["git", "add", file],
-                        cwd=worktree_root,
-                    )
-
+            # Files have already been added above, just commit
             await subprocess_run(
                 ["git", "commit", "--allow-empty", "-m", commit_message],
                 check=True,
@@ -934,6 +953,7 @@ Keep trying until the migration passes verification.
                 env={**os.environ, **environment_variables()},
             )
 
+            # Log verification results
             await subprocess_run(
                 [
                     "git",
@@ -948,11 +968,12 @@ Keep trying until the migration passes verification.
                 cwd=worktree_root,
             )
 
-            if current_exit_code == 0:
+            # If all tests passed, exit successfully
+            if exit_code == 0:
                 log("Verification successful")
                 return True
             else:
-                log(f"Verification failed with {current_exit_code} remaining test steps:")
+                log(f"Verification failed with {exit_code} remaining test steps:")
                 for line in verification_output.splitlines():
                     log(f"[verify] {line}")
 
