@@ -799,8 +799,6 @@ async def _run(
         log("Migration failed: Out of tries")
 
     if goose:
-        best_exit_code = float('inf')  # Track best exit code so far
-        
         for i in range(goose.max_retries):
             log(f"Running migration attempt {i + 1} with Goose")
 
@@ -834,6 +832,12 @@ Keep trying until the migration passes verification.
             if goose_extra:
                 goose_prompt += f"\n\n{goose_extra}"
 
+            # await subprocess_run(
+            #     ["goose", "run", "--text", goose_prompt, "--with-builtin", "developer"],
+            #     check=True,
+            #     cwd=worktree_root,
+            # )
+
             goose_command = [
                 "goose",
                 "run",
@@ -862,6 +866,7 @@ Keep trying until the migration passes verification.
 
             timeout_task = asyncio.create_task(kill_after_timeout())
             
+            # Stream and collect output
             output_lines = []
             
             async def read_stream(stream, prefix):
@@ -873,10 +878,12 @@ Keep trying until the migration passes verification.
                     log(f"[{prefix}] {decoded}")
                     output_lines.append(decoded)
                     
+            # Create tasks for reading stdout and stderr
             stdout_task = asyncio.create_task(read_stream(goose_process.stdout, "goose"))
             stderr_task = asyncio.create_task(read_stream(goose_process.stderr, "goose-err"))
             
             try:
+                # Wait for process to complete and streams to be fully read
                 await goose_process.wait()
                 await stdout_task
                 await stderr_task
@@ -890,28 +897,28 @@ Keep trying until the migration passes verification.
 
             goose_output = "\n".join(output_lines[-50:])
 
-            verify_process = await asyncio.create_subprocess_exec(
-                *full_verify_cmd,
-                cwd=worktree_root,
-                stdout=subprocess.PIPE,
-                stderr=subprocess.PIPE,
-            )
-            stdout, stderr = await verify_process.communicate()
-            verification_output = (stderr or stdout or b"").decode()
-            current_exit_code = verify_process.returncode
-            
-            if current_exit_code > best_exit_code and best_exit_code != 0:
-                log(f"Exit code {current_exit_code} is worse than previous best {best_exit_code}, resetting changes")
-                await subprocess_run(
-                    ["git", "reset", "--hard"],
-                    cwd=worktree_root,
-                )
-                continue
-                
-            best_exit_code = min(best_exit_code, current_exit_code)
+            # if target_dir:
+            #     git_path = Path(file_path).relative_to(worktree_root)
+
+            #     # Only allow files inside target_dir_rel_path to be added
+            #     await subprocess_run(
+            #         ["git", "reset", "--", target_dir_rel_path],
+            #         cwd=worktree_root,
+            #     )
+
+            #     await subprocess_run(
+            #         ["git", "add", git_path],
+            #         cwd=worktree_root,
+            #     )
+            # else:
+            #     for file in written_files:
+            #         await subprocess_run(
+            #             ["git", "add", *written_files],
+            #             cwd=worktree_root,
+            #         )
 
             commit_message = (
-                f"Goose attempt {i + 1}, remaining tests: {current_exit_code}:\n\nGoose response:\n{goose_output}"
+                f"Goose attempt {i + 1}:\n\nGoose response:\n{goose_output}"
             )
 
             if target_dir:
@@ -934,6 +941,21 @@ Keep trying until the migration passes verification.
                 env={**os.environ, **environment_variables()},
             )
 
+            # Clean up anything else goose may have added + run verification directly
+            await subprocess_run(
+                ["git", "reset", "--hard"],
+                cwd=worktree_root,
+            )
+
+            verify_process = await asyncio.create_subprocess_exec(
+                *full_verify_cmd,
+                cwd=worktree_root,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE,
+            )
+            stdout, stderr = await verify_process.communicate()
+
+            verification_output = (stderr or stdout or b"").decode()
             await subprocess_run(
                 [
                     "git",
@@ -948,11 +970,11 @@ Keep trying until the migration passes verification.
                 cwd=worktree_root,
             )
 
-            if current_exit_code == 0:
+            if verify_process.returncode == 0:
                 log("Verification successful")
                 return True
             else:
-                log(f"Verification failed with {current_exit_code} remaining test steps:")
+                log("Verification failed:")
                 for line in verification_output.splitlines():
                     log(f"[verify] {line}")
 
