@@ -151,7 +151,9 @@ async def run(
             log_buffer,
         )
         if manifest.goose:
-            manifest.goose.system_prompt = manifest.goose.system_prompt.format(project_dir=project_dir)
+            manifest.goose.system_prompt = manifest.goose.system_prompt.format(
+                project_dir=project_dir
+            )
 
         try:
             await run_migration(

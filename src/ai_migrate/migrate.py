@@ -432,12 +432,13 @@ async def run(
             check=True,
             cwd=git_root,
         )
-    # Temporarily don't checkout branch. Lets us skip to goose
-    # await subprocess_run(
-    #     ["git", "checkout", "--force", "-B", branch, start_point],
-    #     check=True,
-    #     cwd=worktree_root,
-    # )
+
+    if int(os.getenv("AI_MIGRATE_MAX_TRIES", 10)) >= 1:
+        await subprocess_run(
+            ["git", "checkout", "--force", "-B", branch, start_point],
+            check=True,
+            cwd=worktree_root,
+        )
 
     # If using target_dir, read files from original location instead of worktree
     target_root = source_git_root if target_dir else worktree_root
@@ -799,8 +800,8 @@ async def _run(
         log("Migration failed: Out of tries")
 
     if goose:
-        best_exit_code = float('inf')  # Track best exit code so far
-        
+        best_exit_code = float("inf")  # Track best exit code so far
+
         for i in range(goose.max_retries):
             log(f"Running migration attempt {i + 1} with Goose")
 
@@ -861,9 +862,9 @@ Keep trying until the migration passes verification.
                     goose_process.kill()
 
             timeout_task = asyncio.create_task(kill_after_timeout())
-            
+
             output_lines = []
-            
+
             async def read_stream(stream, prefix):
                 while True:
                     line = await stream.readline()
@@ -872,10 +873,14 @@ Keep trying until the migration passes verification.
                     decoded = line.decode().rstrip()
                     log(f"[{prefix}] {decoded}")
                     output_lines.append(decoded)
-                    
-            stdout_task = asyncio.create_task(read_stream(goose_process.stdout, "goose"))
-            stderr_task = asyncio.create_task(read_stream(goose_process.stderr, "goose-err"))
-            
+
+            stdout_task = asyncio.create_task(
+                read_stream(goose_process.stdout, "goose")
+            )
+            stderr_task = asyncio.create_task(
+                read_stream(goose_process.stderr, "goose-err")
+            )
+
             try:
                 await goose_process.wait()
                 await stdout_task
@@ -897,7 +902,7 @@ Keep trying until the migration passes verification.
                     ["git", "reset"],
                     cwd=worktree_root,
                 )
-                
+
                 # Only add changes in the allowed directory
                 git_path = Path(target_dir_rel_path) / target_basename
                 await subprocess_run(
@@ -910,14 +915,14 @@ Keep trying until the migration passes verification.
                     ["git", "reset"],
                     cwd=worktree_root,
                 )
-                
+
                 # Only add changes to the allowed files
                 for file in written_files:
                     await subprocess_run(
                         ["git", "add", file],
                         cwd=worktree_root,
                     )
-            
+
             # Now run verification on the clean state with only allowed changes
             verify_process = await asyncio.create_subprocess_exec(
                 *full_verify_cmd,
@@ -931,7 +936,9 @@ Keep trying until the migration passes verification.
 
             # If exit code is worse than our best so far (more failing tests), reset everything
             if exit_code > best_exit_code and best_exit_code != 0:
-                log(f"Exit code {exit_code} is worse than previous best {best_exit_code}, resetting changes")
+                log(
+                    f"Exit code {exit_code} is worse than previous best {best_exit_code}, resetting changes"
+                )
                 await subprocess_run(
                     ["git", "reset", "--hard"],
                     cwd=worktree_root,
@@ -940,10 +947,8 @@ Keep trying until the migration passes verification.
 
             # If this is better or equal to our best result so far, commit it
             best_exit_code = min(best_exit_code, exit_code)
-            
-            commit_message = (
-                f"Goose attempt {i + 1}, remaining tests: {exit_code}:\n\nGoose response:\n{goose_output}"
-            )
+
+            commit_message = f"Goose attempt {i + 1}, remaining tests: {exit_code}:\n\nGoose response:\n{goose_output}"
 
             # Files have already been added above, just commit
             await subprocess_run(
