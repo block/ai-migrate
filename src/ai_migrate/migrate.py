@@ -811,7 +811,7 @@ async def _run(
                 goose_extra = ""
 
             directory_instructions = (
-                f"You may only make changes to the files inside {target_dir_rel_path}/{target_basename}. Under no circumstances should you touch any files outside of this directory. If I detect that you do, I will be very disappointed in you and you will be fired."
+                f"You may only make changes to the files inside {target_dir_rel_path}/{target_basename}. Under no circumstances should you touch any files outside of this directory. If I detect that you do, I will be very disappointed in you and will switch to a smarter model."
                 if target_dir
                 else f"You may only make changes to the files: {', '.join(target_files)}. Under no circumstances should you touch any other files."
             )
@@ -895,35 +895,29 @@ Keep trying until the migration passes verification.
 
             goose_output = "\n".join(output_lines[-50:])
 
-            # First, reset any changes to files outside allowed directories
             if target_dir:
-                # Reset everything, then we'll re-add only the allowed files
                 await subprocess_run(
                     ["git", "reset"],
                     cwd=worktree_root,
                 )
 
-                # Only add changes in the allowed directory
                 git_path = Path(target_dir_rel_path) / target_basename
                 await subprocess_run(
                     ["git", "add", git_path],
                     cwd=worktree_root,
                 )
             else:
-                # Reset everything, then we'll re-add only the allowed files
                 await subprocess_run(
                     ["git", "reset"],
                     cwd=worktree_root,
                 )
 
-                # Only add changes to the allowed files
                 for file in written_files:
                     await subprocess_run(
                         ["git", "add", file],
                         cwd=worktree_root,
                     )
 
-            # Now run verification on the clean state with only allowed changes
             verify_process = await asyncio.create_subprocess_exec(
                 *full_verify_cmd,
                 cwd=worktree_root,
@@ -934,7 +928,6 @@ Keep trying until the migration passes verification.
             verification_output = (stderr or stdout or b"").decode()
             exit_code = verify_process.returncode
 
-            # If exit code is worse than our best so far (more failing tests), reset everything
             if exit_code > best_exit_code and best_exit_code != 0:
                 log(
                     f"Exit code {exit_code} is worse than previous best {best_exit_code}, resetting changes"
@@ -945,12 +938,10 @@ Keep trying until the migration passes verification.
                 )
                 continue
 
-            # If this is better or equal to our best result so far, commit it
             best_exit_code = min(best_exit_code, exit_code)
 
             commit_message = f"Goose attempt {i + 1}, remaining tests: {exit_code}:\n\nGoose response:\n{goose_output}"
 
-            # Files have already been added above, just commit
             await subprocess_run(
                 ["git", "commit", "--allow-empty", "-m", commit_message],
                 check=True,
@@ -958,7 +949,6 @@ Keep trying until the migration passes verification.
                 env={**os.environ, **environment_variables()},
             )
 
-            # Log verification results
             await subprocess_run(
                 [
                     "git",
@@ -973,7 +963,6 @@ Keep trying until the migration passes verification.
                 cwd=worktree_root,
             )
 
-            # If all tests passed, exit successfully
             if exit_code == 0:
                 log("Verification successful")
                 return True
