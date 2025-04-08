@@ -10,6 +10,8 @@ from pathlib import Path
 import subprocess
 from typing import Any, Iterable, Optional
 
+from .utils import extract_code_blocks
+
 from pydantic_ai.messages import ToolCallPart
 from pydantic_ai.tools import Tool
 
@@ -461,48 +463,6 @@ async def run(
     )
 
 
-@dataclass
-class CodeBlock:
-    filename: str | None
-    code: str
-
-
-@dataclass
-class CodeResponseResult:
-    code_blocks: list[CodeBlock]
-    other_text: str
-
-
-def extract_code_blocks(markdown, replacement="<code>") -> CodeResponseResult:
-    lines = markdown.splitlines()
-    filename = None
-    line_it = iter(lines)
-    result = CodeResponseResult([], "")
-    other_text = []
-
-    for line in line_it:
-        if line.lstrip().startswith("### ") and line.count("`") == 2:
-            start = line.find("`")
-            end = line.find("`", start + 1)
-            filename = line[start + 1 : end]
-        elif line.lstrip().startswith("```"):
-            code = []
-            for line in line_it:
-                if line.lstrip().startswith("```"):
-                    break
-                code.append(line)
-            result.code_blocks.append(CodeBlock(filename, "\n".join(code)))
-            filename = None
-            other_text.append(replacement)
-        else:
-            other_text.append(line)
-
-    if other_text:
-        result.other_text = "\n".join(other_text)
-
-    return result
-
-
 class FailedPreVerification(Exception):
     pass
 
@@ -546,6 +506,25 @@ async def _run(
     if not examples:
         raise FileNotFoundError("No valid example pairs found in examples directory")
 
+    from .example_selector import select_relevant_examples
+
+    log("[agent] Running example selection analysis...")
+    selection_result = await select_relevant_examples(target_files, examples, client)
+
+    log("\nExample Selection Analysis:")
+    log(selection_result.analysis)
+    log("\nSelected Examples:")
+    for example in selection_result.selected_examples:
+        reason = selection_result.selection_reasons.get(
+            example.name, "No specific reason provided"
+        )
+        log(f"- {example.name}: {reason}")
+    log("\nExcluded Examples:")
+    for name, reason in selection_result.exclusion_reasons.items():
+        log(f"- {name}: {reason}")
+
+    examples = selection_result.selected_examples
+
     system_prompt = Path(system_prompt).read_text()
 
     # TODO: Have some kind of configuration driven controls for how basename is transformed
@@ -554,7 +533,6 @@ async def _run(
             target_basename.replace("-", " ").replace("_", " ").title().replace(" ", "")
         )
 
-    # Create target MigrationExample
     target_file_contents = []
     for i, target_file in enumerate(target_files):
         full_path = Path(target_file).absolute()
