@@ -72,7 +72,7 @@ class Directory(BaseModel):
 
 
 class GooseConfig(BaseModel):
-    system_prompt: str = f"{{project_dir}}/{GOOSE_PROMPT_FILE}"
+    user_prompt: str = f"{{project_dir}}/{GOOSE_PROMPT_FILE}"
     timeout_seconds: int = 15 * 60
     max_retries: int = 3
 
@@ -87,4 +87,4 @@ class Manifest(BaseModel):
     verify_cmd: str = f"{{py}} {{project_dir}}/{VERIFY_SCRIPT_FILE}"
     pre_verify_cmd: str = f"{{py}} {{project_dir}}/{VERIFY_SCRIPT_FILE} --pre"
     time: datetime = Field(default_factory=datetime.now)
-    goose: GooseConfig = Field(default_factory=GooseConfig)
+    goose_config: GooseConfig = Field(default_factory=GooseConfig)

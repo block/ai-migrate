@@ -59,8 +59,8 @@ def test_valid_manifest_groups():
   "verify_cmd": "{py} {project_dir}/verify.py",
   "pre_verify_cmd": "{py} {project_dir}/verify.py --pre",
   "time": "2025-02-10T11:26:33.969758",
-  "goose": {
-    "system_prompt": "{project_dir}/goose_prompt.md",
+  "goose_config": {
+    "user_prompt": "{project_dir}/goose_prompt.md",
     "timeout_seconds": 100,
     "max_retries": 3
   }
@@ -99,9 +99,9 @@ def test_valid_manifest_groups():
     # The hash should be different because the glob pattern is different
     assert dir_glob_group_name.split("-")[1] != dir_group_name.split("-")[1]
 
-    assert manifest.goose.system_prompt == "{project_dir}/goose_prompt.md"
-    assert manifest.goose.timeout_seconds == 100
-    assert manifest.goose.max_retries == 3
+    assert manifest.goose_config.user_prompt == "{project_dir}/goose_prompt.md"
+    assert manifest.goose_config.timeout_seconds == 100
+    assert manifest.goose_config.max_retries == 3
 
 
 def test_normalize_files():

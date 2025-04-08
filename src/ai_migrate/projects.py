@@ -150,9 +150,9 @@ async def run(
             status_manager.get_logger(task_name, header=f"==> {log_file} <=="),
             log_buffer,
         )
-        if manifest.goose:
-            manifest.goose.system_prompt = manifest.goose.system_prompt.format(
-                project_dir=project_dir
+        if manifest.goose_config:
+            manifest.goose_config.user_prompt = (
+                manifest.goose_config.user_prompt.format(project_dir=project_dir)
             )
 
         try:
@@ -173,7 +173,7 @@ async def run(
                 target_dir=manifest.target_dir,
                 target_basename=files.base_name,
                 tools=tools,
-                goose=manifest.goose,
+                goose_config=manifest.goose_config,
             )
             new_result = "pass"
             await status_manager.mark_with_status(task_name, Status.PASSED)

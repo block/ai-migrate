@@ -349,7 +349,7 @@ async def run(
     target_basename: str = "",
     dont_create_evals: bool = False,
     tools: list[Tool] = None,
-    goose: Optional[GooseConfig] = None,
+    goose_config: Optional[GooseConfig] = None,
 ):
     """Run the migration process on the target files.
     Args:
@@ -457,7 +457,7 @@ async def run(
         target_dir_rel_path=target_dir_rel_path,
         target_basename=target_basename,
         tools=tools,
-        goose=goose,
+        goose_config=goose_config,
     )
 
 
@@ -533,7 +533,7 @@ async def _run(
     target_dir_rel_path: Path | str | None = None,
     target_basename: str = None,
     tools: list[Tool] = None,
-    goose: Optional[GooseConfig] = None,
+    goose_config: Optional[GooseConfig] = None,
 ):
     if llm_fakes:
         client = FakeLLMClient(llm_fakes)
@@ -799,16 +799,15 @@ async def _run(
     else:
         log("Migration failed: Out of tries")
 
-    if goose:
+    if goose_config:
         best_exit_code = float("inf")  # Track best exit code so far
 
-        for i in range(goose.max_retries):
+        for i in range(goose_config.max_retries):
             log(f"Running migration attempt {i + 1} with Goose")
 
-            if goose.system_prompt:
-                goose_extra = Path(goose.system_prompt).read_text()
-            else:
-                goose_extra = ""
+            goose_user_extra = ""
+            if goose_config.user_prompt:
+                goose_user_extra = Path(goose_config.user_prompt).read_text()
 
             directory_instructions = (
                 f"You may only make changes to the files inside {target_dir_rel_path}/{target_basename}. Under no circumstances should you touch any files outside of this directory. If I detect that you do, I will be very disappointed in you and will switch to a smarter model."
@@ -818,22 +817,18 @@ async def _run(
 
             verify_cmd_str = " ".join(full_verify_cmd)
 
-            goose_prompt = f"""
-You are a helpful assistant for code migration. The migration is almost done but is not passing verification. With as few changes as possible, make the migration pass verification.
+            goose_prompt = (
+                "You are a helpful assistant for code migration. The migration is almost done but is not passing verification. "
+                "With as few changes as possible, make the migration pass verification. "
+                f"{directory_instructions} "
+                "You may verify if the migration is correct by running the following command: "
+                f"{verify_cmd_str} "
+                "The verification output may be large so pipe it to a file verification_output.txt and read it from there. "
+                "Keep trying until the migration passes verification."
+            )
 
-{directory_instructions}
-
-You may verify if the migration is correct by running the following command:
-
-{verify_cmd_str}
-
-The verification output may be large so pipe it to a file verification_output.txt and read it from there.
-
-Keep trying until the migration passes verification.
-"""
-
-            if goose_extra:
-                goose_prompt += f"\n\n{goose_extra}"
+            if goose_user_extra:
+                goose_prompt += f"\n\n{goose_user_extra}"
 
             goose_command = [
                 "goose",
@@ -854,10 +849,10 @@ Keep trying until the migration passes verification.
             )
 
             async def kill_after_timeout():
-                await asyncio.sleep(goose.timeout_seconds)
+                await asyncio.sleep(goose_config.timeout_seconds)
                 if goose_process.returncode is None:
                     log(
-                        f"[goose] Killing process after {goose.timeout_seconds} seconds timeout"
+                        f"[goose] Killing process after {goose_config.timeout_seconds} seconds timeout"
                     )
                     goose_process.kill()
 
