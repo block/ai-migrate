@@ -17,7 +17,7 @@ from .manifest import (
     FileGroup,
     Directory,
 )
-from .migrate import run as run_migration, FailedPreVerification
+from .migrate import FailedVerificationPartial, run as run_migration, FailedPreVerification
 from .progress import StatusManager, Status
 
 
@@ -180,6 +180,9 @@ async def run(
         except FailedPreVerification:
             await status_manager.mark_with_status(task_name, Status.FAILED)
             new_result = "fail-pre-verify"
+        except FailedVerificationPartial as e:
+            await status_manager.mark_with_status(task_name, Status.FAILED)
+            new_result = f"fail-verify-remaining-{e.remaining_files}"
         except Exception:
             await status_manager.mark_with_status(task_name, Status.FAILED)
             traceback.print_exc(file=logger)

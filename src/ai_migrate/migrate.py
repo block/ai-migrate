@@ -506,6 +506,12 @@ def extract_code_blocks(markdown, replacement="<code>") -> CodeResponseResult:
 class FailedPreVerification(Exception):
     pass
 
+class FailedVerificationPartial(Exception):
+    remaining_files: int
+
+    def __init__(self, remaining_files: int):
+        self.remaining_files = remaining_files
+
 
 async def remove_worktree(worktree_root: str | Path):
     await asyncio.to_thread(shutil.rmtree, worktree_root, ignore_errors=True)
@@ -965,5 +971,8 @@ async def _run(
                 log(f"Verification failed with {exit_code} remaining test steps:")
                 for line in verification_output.splitlines():
                     log(f"[verify] {line}")
+
+        if best_exit_code != 0 and best_exit_code != float("inf"):
+            raise FailedVerificationPartial(best_exit_code)
 
     raise ValueError("Migration failed: Out of tries")
