@@ -5,6 +5,7 @@ from pathlib import Path
 from pydantic import BaseModel, Field
 
 SYSTEM_PROMPT_FILE = "system_prompt.md"
+GOOSE_PROMPT_FILE = "goose_prompt.md"
 VERIFY_SCRIPT_FILE = "verify.py"
 
 
@@ -70,6 +71,12 @@ class Directory(BaseModel):
         return FileGroup(files=files, result=self.result, base_name=base_name)
 
 
+class GooseConfig(BaseModel):
+    user_prompt: str = f"{{project_dir}}/{GOOSE_PROMPT_FILE}"
+    timeout_seconds: int = 15 * 60
+    max_retries: int = 3
+
+
 class Manifest(BaseModel):
     eval_target_repo_ref: str = ""
     eval_target_repo_remote: str = ""
@@ -80,3 +87,4 @@ class Manifest(BaseModel):
     verify_cmd: str = f"{{py}} {{project_dir}}/{VERIFY_SCRIPT_FILE}"
     pre_verify_cmd: str = f"{{py}} {{project_dir}}/{VERIFY_SCRIPT_FILE} --pre"
     time: datetime = Field(default_factory=datetime.now)
+    goose_config: GooseConfig = Field(default_factory=GooseConfig)
