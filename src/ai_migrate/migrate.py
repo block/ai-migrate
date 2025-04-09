@@ -625,10 +625,10 @@ async def _run(
         log(f"[agent] Messages length: {client.count_tokens(messages)}")
         while 0 < client.max_context_tokens() < client.count_tokens(messages):
             log(f"Trimming iteration messages: {len(iteration_messages)}")
-            # Fall back to 3 examples + trim iterations 1 at a time.
             messages = combine_examples_into_conversation(
-                examples[:3], target, system_prompt
+                examples, target, system_prompt
             )
+            examples = examples[1:]
             iteration_messages = iteration_messages[1:]
             messages = build_messages(messages, iteration_messages)
 
