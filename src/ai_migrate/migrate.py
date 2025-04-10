@@ -618,6 +618,10 @@ async def _run(
                 cwd=worktree_root,
             )
 
+    # Main migration attempts
+    migration_successful = False
+    written_files = set()
+    
     for tries in range(int(os.getenv("AI_MIGRATE_MAX_TRIES", 10))):
         log(f"[agent] Running migration attempt {tries + 1}")
 
@@ -636,9 +640,12 @@ async def _run(
             target_files=target_files,
             target_dir=Path(target_dir) if target_dir else None,
         )
+
+        log(f"Calling LLM with {len(messages)} messages")
         response, messages = await call_llm(
             client, messages, tools or [], context=context
         )
+        log(f"LLM done calling llm")
 
         response_text = response["choices"][0]["message"]["content"]
         parsed_result = extract_code_blocks(response_text)
@@ -653,6 +660,8 @@ async def _run(
                 }
             )
             continue
+
+        log(f"Done parsing result")
 
         written_files = set()
         for code_block in parsed_result.code_blocks:
@@ -673,6 +682,8 @@ async def _run(
 
                 with open(output_path, "w") as f:
                     f.write(migrated_code)
+
+        log(f"Wrote {len(written_files)} files")
 
         all_files_to_verify |= written_files
 
@@ -697,6 +708,7 @@ async def _run(
                     Path(worktree_root) / target_dir_rel_path / target_basename / file
                 )
                 git_path = Path(file_path).relative_to(worktree_root)
+                log(f"Adding {git_path}")
                 await subprocess_run(
                     ["git", "add", git_path],
                     cwd=worktree_root,
@@ -707,6 +719,7 @@ async def _run(
                     cwd=worktree_root,
                 )
 
+        log(f"Committing {commit_message}")
         await subprocess_run(
             ["git", "commit", "--allow-empty", "-m", commit_message],
             check=True,
@@ -778,7 +791,8 @@ async def _run(
                     log(f"Error creating evaluation: {e}")
                     log(f"Exception type: {type(e).__name__}")
 
-            await remove_worktree(worktree_root)
+            # await remove_worktree(worktree_root)
+            migration_successful = True
             return True
         log("Verification failed:")
         for line in verification_output.splitlines():
@@ -802,10 +816,11 @@ async def _run(
         )
         iteration_messages.append(iteration_message)
 
-    else:
+    if not migration_successful:
         log("Migration failed: Out of tries")
 
-    if goose_config:
+    # Run goose if configured, regardless of how the main loop exited
+    if goose_config and not migration_successful and False:
         best_exit_code = float("inf")  # Track best exit code so far
 
         for i in range(goose_config.max_retries):
@@ -823,13 +838,15 @@ async def _run(
 
             verify_cmd_str = " ".join(full_verify_cmd)
 
+            log(f"Verify command: {verify_cmd_str}")
+
             goose_prompt = (
                 "You are a helpful assistant for code migration. The migration is almost done but is not passing verification. "
                 "With as few changes as possible, make the migration pass verification. "
                 f"{directory_instructions} "
                 "You may verify if the migration is correct by running the following command: "
                 f"{verify_cmd_str} "
-                "The verification output may be large so pipe it to a file verification_output.txt and read it from there. "
+                "The verification output may be large. If you run into its size, pipe it to a file verification_output.txt and read it from there. "
                 "Keep trying until the migration passes verification."
             )
 
@@ -975,4 +992,5 @@ async def _run(
         if best_exit_code != 0 and best_exit_code != float("inf"):
             raise FailedVerificationPartial(best_exit_code)
 
-    raise ValueError("Migration failed: Out of tries")
+    if not migration_successful:
+        raise ValueError("Migration failed: Out of tries")
