@@ -419,21 +419,58 @@ async def run(
     ]
 
     file_flat = FileGroup(files=target_files).group_name()
-    worktree_name = f"ai-migrator-worktree-{git_root.name}-{file_flat}"
+    worktree_name = f"ai-migrator-worktree-{git_root.name}-{file_flat}-3"
     if local_worktrees:
         worktree_root = git_root.parent / "ai-migrator-worktrees" / worktree_name
     else:
         worktree_root = Path(tempfile.gettempdir()) / worktree_name
     branch = f"ai-migrator/{file_flat}"
 
-    if not worktree_root.exists():
-        await subprocess_run(
-            ["git", "worktree", "add", worktree_root, "HEAD"],
-            check=True,
-            cwd=git_root,
-        )
+    if os.getenv("AI_MIGRATE_DISABLE_WORKTREE"):
+        worktree_root = git_root
 
-    if int(os.getenv("AI_MIGRATE_MAX_TRIES", 10)) >= 1:
+        # First checkout main branch
+        await subprocess_run(
+            ["git", "checkout", "--force", "main"], 
+            check=True, 
+            cwd=str(worktree_root)
+        )
+        
+        # Then get the commit hash for start_point
+        start_point = (
+            await subprocess_run(
+                ["git", "rev-parse", "HEAD"], 
+                check=True, 
+                cwd=str(worktree_root)
+            )
+        ).strip()
+        
+        # Create the branch
+        await subprocess_run(
+            ["git", "checkout", "--force", "-B", branch, start_point],
+            check=True,
+            cwd=worktree_root,
+        )
+    else:
+        os.environ["HUSKY"] = "0"
+        
+        # Get the current HEAD for the worktree
+        start_point = (
+            await subprocess_run(
+                ["git", "rev-parse", "HEAD"], 
+                check=True, 
+                cwd=git_root
+            )
+        ).strip()
+
+        if not worktree_root.exists():
+            await subprocess_run(
+                ["git", "worktree", "add", worktree_root, "HEAD"],
+                check=True,
+                cwd=git_root,
+            )
+            
+        # Create the branch in the worktree
         await subprocess_run(
             ["git", "checkout", "--force", "-B", branch, start_point],
             check=True,
@@ -820,7 +857,7 @@ async def _run(
         log("Migration failed: Out of tries")
 
     # Run goose if configured, regardless of how the main loop exited
-    if goose_config and not migration_successful and False:
+    if goose_config and not migration_successful:
         best_exit_code = float("inf")  # Track best exit code so far
 
         for i in range(goose_config.max_retries):
