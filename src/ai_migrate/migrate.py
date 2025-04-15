@@ -419,7 +419,9 @@ async def run(
     ]
 
     file_flat = FileGroup(files=target_files).group_name()
-    worktree_name = f"ai-migrator-worktree-{git_root.name}-{file_flat}-3"
+    file_flat += "-3"
+    worktree_name = f"ai-migrator-worktree-{git_root.name}-{file_flat}"
+    log(f"worktree_name: {worktree_name}")
     if local_worktrees:
         worktree_root = git_root.parent / "ai-migrator-worktrees" / worktree_name
     else:
